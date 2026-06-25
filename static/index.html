@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Яндекс Метрика — Logs API Loader</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Logs API Loader</h1>
+      <p class="subtitle">Выгрузка сырых данных Яндекс.Метрики в PostgreSQL</p>
+    </header>
+
+    <section class="card" id="settings-section">
+      <h2>Настройки</h2>
+      <div class="form-grid">
+        <label class="field field-wide">
+          <span>OAuth-токен</span>
+          <input type="password" id="token" autocomplete="off" placeholder="y0_…">
+        </label>
+        <div class="field-actions">
+          <button type="button" id="connect-btn">Подключить</button>
+        </div>
+        <label class="field field-wide">
+          <span>Счётчик</span>
+          <select id="counter" disabled>
+            <option value="">— выберите счётчик —</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Дата от</span>
+          <input type="date" id="date-from">
+        </label>
+        <label class="field">
+          <span>Дата до</span>
+          <input type="date" id="date-to">
+        </label>
+        <div class="field-actions field-wide">
+          <button type="button" id="export-btn" disabled>Сформировать отчёт</button>
+        </div>
+      </div>
+      <p class="error" id="settings-error" hidden></p>
+    </section>
+
+    <section class="card hidden" id="status-section">
+      <h2>Статус выгрузки</h2>
+      <div class="progress-wrap">
+        <div class="progress-bar" id="progress-bar"></div>
+      </div>
+      <p class="status-message" id="status-message"></p>
+      <p class="status-meta" id="status-meta"></p>
+      <div class="preview-actions hidden" id="preview-actions">
+        <button type="button" id="show-visits-btn">Показать визиты</button>
+        <button type="button" id="show-hits-btn">Показать события</button>
+      </div>
+    </section>
+
+    <section class="card hidden" id="preview-section">
+      <div class="preview-header">
+        <h2>Превью данных</h2>
+        <div class="preview-controls">
+          <span id="preview-total"></span>
+          <div class="toggle-group">
+            <button type="button" class="toggle active" data-table="visits">Визиты</button>
+            <button type="button" class="toggle" data-table="hits">События</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="preview-table">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
