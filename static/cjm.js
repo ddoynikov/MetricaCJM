@@ -617,6 +617,18 @@ async function initPage() {
     showAuthorized(data.token_hint);
     await loadCounters();
     await loadChannels();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const prefilledHash = urlParams.get("user_hash");
+    if (prefilledHash) {
+      userSearchBar.classList.remove("hidden");
+      userIdValueInput.value = prefilledHash;
+      userIdTypeSelect.value = "counter_user_id_hash";
+      updateUserIdPlaceholder();
+      applyUserSearch();
+      return;
+    }
+
     if (getSelectedCounterId()) {
       await loadCjm();
     } else {

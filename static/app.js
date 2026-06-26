@@ -66,6 +66,8 @@ let dbCurrentTable = "visits";
 let dbCurrentPage = 0;
 let dbCurrentCounter = "";
 const DB_PAGE_SIZE = 25;
+let dbSortCol = null;
+let dbSortDir = "desc";
 let dateFrom = "";
 let dateTo = "";
 let fpInstance = null;
@@ -340,10 +342,46 @@ function showMissingDatesPopover(anchor, dates) {
 
   const pop = document.createElement("div");
   pop.className = "missing-popover";
-  pop.innerHTML = `
-    <div class="missing-popover-title">Пропущенные даты</div>
-    ${dates.map((d) => `<div class="missing-date">${d}</div>`).join("")}
-  `;
+  pop.addEventListener("click", (e) => e.stopPropagation());
+
+  const title = document.createElement("div");
+  title.className = "missing-popover-title";
+  title.textContent = "Пропущенные даты";
+  pop.appendChild(title);
+
+  dates.forEach((d) => {
+    const row = document.createElement("div");
+    row.className = "missing-date";
+    row.textContent = new Date(d).toLocaleDateString("ru-RU");
+    pop.appendChild(row);
+  });
+
+  const btn = document.createElement("button");
+  btn.className = "btn-accent btn-sm";
+  btn.style.marginTop = "8px";
+  btn.style.width = "100%";
+  btn.textContent = "↓ Догрузить пропуски";
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const sorted = [...dates].sort();
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+
+    pop.remove();
+
+    const startDate = new Date(first);
+    const endDate = new Date(last);
+    if (fpInstance) fpInstance.setDate([startDate, endDate]);
+    dateFrom = first;
+    dateTo = last;
+    updateDateRangeText(startDate, endDate);
+    periodButtons.forEach((b) => b.classList.remove("active"));
+    updateExportButtonState();
+    updateTopbarMeta();
+
+    document.getElementById("exportForm")?.scrollIntoView({ behavior: "smooth" });
+  });
+  pop.appendChild(btn);
 
   const rect = anchor.getBoundingClientRect();
   pop.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${rect.left}px;z-index:1000`;
@@ -531,10 +569,64 @@ function formatColumnHeader(column) {
   return column.replace(/^ym:[a-z]+:/, "");
 }
 
+function isClientIdColumn(col) {
+  const lc = col.toLowerCase();
+  return lc.includes("counteruserid") || lc.includes("client_id");
+}
+
+function reorderClientIdColumn(columns, rows) {
+  const clientIdCol = columns.findIndex(isClientIdColumn);
+  if (clientIdCol <= 1) return { columns, rows };
+
+  const cols = [...columns];
+  const colName = cols.splice(clientIdCol, 1)[0];
+  cols.splice(1, 0, colName);
+
+  const newRows = rows.map((row) => {
+    const r = [...row];
+    const val = r.splice(clientIdCol, 1)[0];
+    r.splice(1, 0, val);
+    return r;
+  });
+
+  return { columns: cols, rows: newRows };
+}
+
+function attachDbTableSort(table, tbody) {
+  const headers = table.querySelectorAll("th");
+  headers.forEach((th, i) => {
+    th.addEventListener("click", () => {
+      if (dbSortCol === i) {
+        dbSortDir = dbSortDir === "asc" ? "desc" : "asc";
+      } else {
+        dbSortCol = i;
+        dbSortDir = "desc";
+      }
+
+      headers.forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
+      th.classList.add(dbSortDir === "asc" ? "sort-asc" : "sort-desc");
+
+      const trs = [...tbody.querySelectorAll("tr")];
+      trs.sort((a, b) => {
+        const av = a.cells[i]?.textContent || "";
+        const bv = b.cells[i]?.textContent || "";
+        const n = (v) => (isNaN(Number(v)) || v === "" ? v : Number(v));
+        if (dbSortDir === "asc") {
+          return n(av) > n(bv) ? 1 : n(av) < n(bv) ? -1 : 0;
+        }
+        return n(av) < n(bv) ? 1 : n(av) > n(bv) ? -1 : 0;
+      });
+      trs.forEach((tr) => tbody.appendChild(tr));
+    });
+  });
+}
+
 async function loadDbTable() {
   if (!dbTableWrap) return;
 
   dbTableWrap.innerHTML = '<div class="loading-state">Загрузка...</div>';
+  dbSortCol = null;
+  dbSortDir = "desc";
 
   const params = new URLSearchParams({
     table: dbCurrentTable,
@@ -551,8 +643,10 @@ async function loadDbTable() {
     }
 
     const total = data.total || 0;
-    const columns = data.columns || [];
-    const rows = data.rows || [];
+    let columns = data.columns || [];
+    let rows = data.rows || [];
+    ({ columns, rows } = reorderClientIdColumn(columns, rows));
+
     const from = total ? dbCurrentPage * DB_PAGE_SIZE + 1 : 0;
     const to = Math.min((dbCurrentPage + 1) * DB_PAGE_SIZE, total);
 
@@ -565,27 +659,45 @@ async function loadDbTable() {
     table.className = "data-table";
 
     const thead = document.createElement("thead");
-    thead.innerHTML =
-      "<tr>" +
-      columns
-        .map((c) => `<th title="${c}">${formatColumnHeader(c)}</th>`)
-        .join("") +
-      "</tr>";
+    const headerRow = document.createElement("tr");
+    columns.forEach((c) => {
+      const th = document.createElement("th");
+      th.textContent = formatColumnHeader(c);
+      th.title = c;
+      headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
     rows.forEach((row) => {
       const tr = document.createElement("tr");
-      row.forEach((cell) => {
+      row.forEach((cell, colIndex) => {
         const td = document.createElement("td");
         const text = formatDbCell(cell);
         td.textContent = text;
         td.title = text;
+
+        if (colIndex === 1 && isClientIdColumn(columns[colIndex])) {
+          td.style.cursor = "pointer";
+          td.title = "Нажмите чтобы исследовать в CJM";
+          td.style.color = "var(--accent)";
+          td.style.textDecoration = "underline";
+          td.addEventListener("click", () => {
+            const hash = td.textContent.trim();
+            if (!hash) return;
+            if (dbPopup) dbPopup.style.display = "none";
+            window.location.href = `/cjm?user_hash=${encodeURIComponent(hash)}`;
+          });
+        }
+
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
+
+    attachDbTableSort(table, tbody);
 
     dbTableWrap.innerHTML = "";
     dbTableWrap.appendChild(table);
