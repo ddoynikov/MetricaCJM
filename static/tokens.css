@@ -1,0 +1,56 @@
+:root {
+  /* Backgrounds */
+  --bg-base: #0D0F12;
+  --bg-surface: #141720;
+  --bg-elevated: #1C2030;
+  --bg-hover: #232840;
+
+  /* Borders */
+  --border-subtle: #252A3A;
+  --border-default: #2E3550;
+
+  /* Text */
+  --text-primary: #E8EAF0;
+  --text-secondary: #8B90A8;
+  --text-muted: #555C78;
+
+  /* Accent */
+  --accent: #4F7CFF;
+  --accent-dim: rgba(79, 124, 255, 0.15);
+
+  /* Status */
+  --success: #34C97E;
+  --warning: #F5A623;
+  --error: #E05555;
+
+  /* Typography scale */
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* Legacy aliases used in JS */
+  --muted: var(--text-secondary);
+  --text: var(--text-primary);
+  --border: var(--border-subtle);
+  --card: var(--bg-surface);
+}

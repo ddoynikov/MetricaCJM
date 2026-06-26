@@ -31,6 +31,13 @@ cp .env.example .env
 
 Открыть http://localhost:8000
 
+## Сохранение состояния
+
+```bash
+./save.sh                          # быстрый checkpoint
+./save.sh "описание что сделано"   # с комментарием
+```
+
 ## Схема БД
 - Схема: `raw_metrika`
 - Таблицы: `visits`, `hits`

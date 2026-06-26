@@ -19,11 +19,12 @@ from typing import Any
 import httpx
 import psycopg
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from psycopg.rows import dict_row
+from starlette.middleware.sessions import SessionMiddleware
 
 from fields import (
     HITS_FIELD_CHUNKS,
@@ -41,6 +42,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://analytics:analytics@localhost:5432/analytics")
+METRIKA_TOKEN = os.getenv("METRIKA_TOKEN", "").strip()
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
+SESSION_TOKEN_KEY = "metrika_token"
+SESSION_LOGOUT_KEY = "auth_cleared"
 METRIKA_API = "https://api-metrika.yandex.net/management/v1"
 POLL_INTERVAL_FAST_SEC = 5
 POLL_INTERVAL_SLOW_SEC = 10
@@ -49,6 +54,7 @@ POLL_TIMEOUT_SEC = 30 * 60
 BATCH_SIZE = 1000
 
 app = FastAPI(title="Metrika Logs Loader")
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 jobs: dict[str, dict[str, Any]] = {}
 jobs_lock = threading.Lock()
 
@@ -80,10 +86,69 @@ TABLE_CONFIG = {
 
 
 class ExportRequest(BaseModel):
-    token: str
     counter_id: int
     date_from: date
     date_to: date
+
+
+class AuthRequest(BaseModel):
+    token: str
+
+
+def token_hint(token: str) -> str:
+    if len(token) <= 3:
+        return "****"
+    return f"{token[:3]}...****"
+
+
+def get_session_token(request: Request) -> str | None:
+    value = request.session.get(SESSION_TOKEN_KEY)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def ensure_session_token(request: Request) -> str | None:
+    token = get_session_token(request)
+    if token:
+        return token
+    if request.session.get(SESSION_LOGOUT_KEY):
+        return None
+    if METRIKA_TOKEN:
+        request.session[SESSION_TOKEN_KEY] = METRIKA_TOKEN
+        return METRIKA_TOKEN
+    return None
+
+
+def resolve_token(request: Request) -> str:
+    token = ensure_session_token(request)
+    if token:
+        return token
+    raise HTTPException(status_code=401, detail="Токен не задан")
+
+
+def fetch_counters(auth_token: str) -> list[dict[str, Any]]:
+    url = f"{METRIKA_API}/counters"
+    try:
+        with httpx.Client() as client:
+            response = client.get(
+                url,
+                params={"oauth_token": auth_token},
+                headers=metrika_headers(auth_token),
+                timeout=30,
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Ошибка соединения с API Метрики: {exc}"
+        ) from exc
+
+    if response.status_code in (401, 403):
+        raise HTTPException(status_code=401, detail="Токен недействителен, проверьте права приложения")
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=extract_api_error(response))
+
+    counters = response.json().get("counters", [])
+    return [{"id": c["id"], "name": c.get("name", ""), "site": c.get("site", "")} for c in counters]
 
 
 def get_connection() -> psycopg.Connection:
@@ -651,31 +716,55 @@ async def run_export(job_id: str, token: str, counter_id: int, date_from: date, 
         update_job(job_id, status="error", message=str(exc))
 
 
-@app.get("/api/counters")
-def get_counters(token: str = Query(..., min_length=1)):
-    url = f"{METRIKA_API}/counters"
+@app.get("/api/auth/status")
+def auth_status(request: Request):
+    token = ensure_session_token(request)
+    if not token:
+        return {"authorized": False, "token_hint": None}
+    return {"authorized": True, "token_hint": token_hint(token)}
+
+
+@app.post("/api/auth")
+def auth_login(body: AuthRequest, request: Request):
+    token = body.token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Токен не задан")
+    fetch_counters(token)
+    request.session[SESSION_TOKEN_KEY] = token
+    request.session.pop(SESSION_LOGOUT_KEY, None)
+    return {"ok": True}
+
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request):
+    request.session.pop(SESSION_TOKEN_KEY, None)
+    request.session[SESSION_LOGOUT_KEY] = True
+    return {"ok": True}
+
+
+@app.get("/api/stats")
+def get_stats():
     try:
-        with httpx.Client() as client:
-            response = client.get(
-                url,
-                params={"oauth_token": token},
-                headers=metrika_headers(token),
-                timeout=30,
-            )
-    except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail=f"Ошибка соединения с API Метрики: {exc}") from exc
+        counters = fetch_all_counters_stats()
+        last_updated = fetch_last_updated()
+    except Exception as exc:
+        logger.exception("Stats fetch failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {
+        "counters": counters,
+        "last_updated": last_updated,
+    }
 
-    if response.status_code in (401, 403):
-        raise HTTPException(status_code=401, detail="Токен недействителен, проверьте права приложения")
-    if response.status_code >= 400:
-        raise HTTPException(status_code=response.status_code, detail=extract_api_error(response))
 
-    counters = response.json().get("counters", [])
-    return [{"id": c["id"], "name": c.get("name", ""), "site": c.get("site", "")} for c in counters]
+@app.get("/api/counters")
+def get_counters(request: Request):
+    auth_token = resolve_token(request)
+    return fetch_counters(auth_token)
 
 
 @app.post("/api/export")
-def start_export(body: ExportRequest, background_tasks: BackgroundTasks):
+def start_export(body: ExportRequest, request: Request, background_tasks: BackgroundTasks):
+    auth_token = resolve_token(request)
     job_id = str(uuid.uuid4())
     with jobs_lock:
         jobs[job_id] = {
@@ -688,7 +777,7 @@ def start_export(body: ExportRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(
         run_export,
         job_id,
-        body.token,
+        auth_token,
         body.counter_id,
         body.date_from,
         body.date_to,
@@ -764,8 +853,463 @@ def preview_data(
     return {"total": total, "rows": serialized, "columns": cols}
 
 
+def serialize_row_value(value: Any, is_array: bool) -> Any:
+    if is_array and value is not None:
+        return [int(v) if isinstance(v, Decimal) else v for v in value]
+    if isinstance(value, Decimal):
+        return int(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return value
+
+
+@app.get("/api/table-preview")
+def table_preview(
+    table: str = Query(..., pattern="^(visits|hits)$"),
+    counter_id: int | None = Query(None),
+    limit: int = Query(50, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+):
+    cfg = TABLE_CONFIG[table]
+    cols = [col for _, col, _ in cfg["schema"]]
+    col_list = ", ".join(quote_column(c) for c in cols)
+    array_cols = {col for _, col, pg_type in cfg["schema"] if pg_type.endswith("[]")}
+
+    where_clauses: list[str] = []
+    params: list[Any] = []
+    if counter_id is not None:
+        where_clauses.append("counter_id = %s")
+        params.append(counter_id)
+
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                f"SELECT COUNT(*) AS total FROM {cfg['table']} {where_sql}",
+                params,
+            )
+            total = int(cur.fetchone()["total"])
+
+            cur.execute(
+                f"""
+                SELECT {col_list}
+                FROM {cfg['table']}
+                {where_sql}
+                ORDER BY date DESC
+                LIMIT %s OFFSET %s
+                """,
+                [*params, limit, offset],
+            )
+            rows = cur.fetchall()
+
+    serialized_rows = []
+    for row in rows:
+        serialized_rows.append(
+            [serialize_row_value(row[col], col in array_cols) for col in cols]
+        )
+
+    return {"columns": cols, "rows": serialized_rows, "total": total}
+
+
+@app.get("/api/project-status")
+async def get_project_status():
+    try:
+        with open("PROJECT_STATUS.md", "r", encoding="utf-8") as f:
+            content = f.read()
+        return {"content": content}
+    except FileNotFoundError:
+        return {"content": "PROJECT_STATUS.md не найден"}
+
+
+CJM_SCHEMA_SQL = os.path.join(os.path.dirname(__file__), "sql", "004_cjm_schema.sql")
+CJM_DEVICES = frozenset({"all", "desktop", "mobile", "tablet"})
+
+
+def build_cjm_filter(
+    device: str,
+    utm_medium: str | None,
+    counter_id: int | None = None,
+    user_id_type: str | None = None,
+    user_id_value: str | None = None,
+) -> tuple[str, list[Any], str | None]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    warning: str | None = None
+    if counter_id is not None:
+        clauses.append("counter_id = %s")
+        params.append(counter_id)
+    if device != "all":
+        clauses.append("device_category = %s")
+        params.append(device)
+    if utm_medium:
+        clauses.append("utm_medium = %s")
+        params.append(utm_medium)
+    if user_id_type and user_id_value:
+        if user_id_type == "counter_user_id_hash":
+            clauses.append(
+                "visit_id IN ("
+                "SELECT visit_id FROM raw_metrika.hits "
+                "WHERE counter_user_id_hash = %s"
+                ")"
+            )
+            params.append(user_id_value)
+        elif user_id_type == "user_id":
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT EXISTS (
+                          SELECT 1 FROM information_schema.columns
+                          WHERE table_schema = 'raw_metrika'
+                            AND table_name = 'hits'
+                            AND column_name = 'user_id'
+                        )
+                        """
+                    )
+                    has_user_id = bool(cur.fetchone()[0])
+            if not has_user_id:
+                warning = (
+                    "UserID не найден в загруженных данных. "
+                    "Возможно, сайт не передаёт UserID в Метрику."
+                )
+                clauses.append("FALSE")
+            else:
+                clauses.append(
+                    "visit_id IN ("
+                    "SELECT visit_id FROM raw_metrika.hits "
+                    "WHERE user_id = %s"
+                    ")"
+                )
+                params.append(user_id_value)
+    if not clauses:
+        return "TRUE", params, warning
+    return " AND ".join(clauses), params, warning
+
+
+def empty_stats_block() -> dict[str, Any]:
+    return {
+        "total_rows": None,
+        "date_min": None,
+        "date_max": None,
+        "missing_days": None,
+    }
+
+
+def fetch_missing_days_for_counter(
+    cur: psycopg.Cursor,
+    table: str,
+    date_col: str,
+    counter_id: int,
+    date_min: date,
+    date_max: date,
+) -> list[str]:
+    cur.execute(
+        f"""
+        SELECT d::date AS missing_day
+        FROM generate_series(%s::date, %s::date, '1 day'::interval) d
+        WHERE d::date NOT IN (
+          SELECT DISTINCT {quote_column(date_col)}
+          FROM {table}
+          WHERE counter_id = %s
+        )
+        ORDER BY d
+        """,
+        (date_min, date_max, counter_id),
+    )
+    return [
+        m["missing_day"].isoformat()
+        for m in cur.fetchall()
+        if m["missing_day"]
+    ]
+
+
+def fetch_grouped_table_stats(
+    cur: psycopg.Cursor,
+    table: str,
+    date_col: str,
+) -> dict[int, dict[str, Any]]:
+    cur.execute(
+        f"""
+        SELECT
+          counter_id,
+          COUNT(*) AS total_rows,
+          MIN({quote_column(date_col)}) AS date_min,
+          MAX({quote_column(date_col)}) AS date_max
+        FROM {table}
+        GROUP BY counter_id
+        """
+    )
+    result: dict[int, dict[str, Any]] = {}
+    for row in cur.fetchall():
+        counter_id = int(row["counter_id"])
+        date_min = row["date_min"]
+        date_max = row["date_max"]
+        missing_days: list[str] = []
+        if date_min and date_max:
+            missing_days = fetch_missing_days_for_counter(
+                cur, table, date_col, counter_id, date_min, date_max
+            )
+        result[counter_id] = {
+            "total_rows": int(row["total_rows"]),
+            "date_min": date_min.isoformat() if date_min else None,
+            "date_max": date_max.isoformat() if date_max else None,
+            "missing_days": missing_days,
+        }
+    return result
+
+
+def fetch_all_counters_stats() -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            visits_by_counter = fetch_grouped_table_stats(
+                cur, "raw_metrika.visits", "date"
+            )
+            hits_by_counter = fetch_grouped_table_stats(
+                cur, "raw_metrika.hits", "date"
+            )
+
+    all_counter_ids = set(visits_by_counter.keys()) | set(hits_by_counter.keys())
+    counters: list[dict[str, Any]] = []
+    for counter_id in sorted(all_counter_ids):
+        counters.append(
+            {
+                "counter_id": counter_id,
+                "visits": visits_by_counter.get(counter_id, empty_stats_block()),
+                "hits": hits_by_counter.get(counter_id, empty_stats_block()),
+            }
+        )
+    return counters
+
+
+def fetch_last_updated() -> str | None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT MAX(ts) AS last_updated FROM (
+                  SELECT MAX(loaded_at) AS ts FROM raw_metrika.visits
+                  UNION ALL
+                  SELECT MAX(loaded_at) AS ts FROM raw_metrika.hits
+                ) t
+                """
+            )
+            row = cur.fetchone()
+            if row and row[0]:
+                ts = row[0]
+                if isinstance(ts, datetime):
+                    return ts.isoformat()
+                return str(ts)
+    return None
+
+
+def cjm_tables_exist(cur: psycopg.Cursor) -> bool:
+    cur.execute(
+        """
+        SELECT COUNT(*) = 3 AS ready
+        FROM information_schema.tables
+        WHERE table_schema = 'app_metrica_cjm'
+          AND table_name IN ('hits_normalized', 'transitions', 'page_metrics')
+        """
+    )
+    row = cur.fetchone()
+    return bool(row and row["ready"])
+
+
+def refresh_cjm_tables() -> None:
+    with open(CJM_SCHEMA_SQL, encoding="utf-8") as f:
+        sql = f.read()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+        conn.commit()
+
+
+CJM_NODES_SQL = """
+WITH filtered AS (
+  SELECT visit_id, page, date_time
+  FROM app_metrica_cjm.hits_normalized
+  WHERE {filter}
+),
+entries AS (
+  SELECT page, COUNT(*) AS entry_count
+  FROM (
+    SELECT DISTINCT ON (visit_id) visit_id, page
+    FROM filtered
+    ORDER BY visit_id, date_time ASC
+  ) t
+  GROUP BY page
+),
+exits AS (
+  SELECT page, COUNT(*) AS exit_count
+  FROM (
+    SELECT DISTINCT ON (visit_id) visit_id, page
+    FROM filtered
+    ORDER BY visit_id, date_time DESC
+  ) t
+  GROUP BY page
+),
+totals AS (
+  SELECT page, COUNT(DISTINCT visit_id) AS unique_visits
+  FROM filtered
+  GROUP BY page
+)
+SELECT
+  t.page AS id,
+  t.unique_visits AS visits,
+  COALESCE(e.entry_count, 0) AS entries,
+  COALESCE(x.exit_count, 0) AS exits,
+  ROUND(COALESCE(x.exit_count, 0)::numeric / NULLIF(t.unique_visits, 0) * 100, 1) AS exit_rate
+FROM totals t
+LEFT JOIN entries e ON t.page = e.page
+LEFT JOIN exits x ON t.page = x.page
+ORDER BY t.unique_visits DESC
+"""
+
+CJM_EDGES_SQL = """
+WITH filtered AS (
+  SELECT visit_id, page, date_time
+  FROM app_metrica_cjm.hits_normalized
+  WHERE {filter}
+),
+ordered AS (
+  SELECT
+    visit_id,
+    page,
+    LAG(page) OVER (PARTITION BY visit_id ORDER BY date_time) AS prev_page
+  FROM filtered
+)
+SELECT
+  prev_page AS "from",
+  page AS "to",
+  COUNT(*) AS count,
+  COUNT(DISTINCT visit_id) AS unique_visits
+FROM ordered
+WHERE prev_page IS NOT NULL
+  AND prev_page != page
+GROUP BY prev_page, page
+HAVING COUNT(*) >= %s OR prev_page = '/' OR page = '/'
+ORDER BY COUNT(*) DESC
+"""
+
+CJM_CHANNELS_SQL = """
+SELECT DISTINCT utm_medium
+FROM app_metrica_cjm.hits_normalized
+WHERE utm_medium IS NOT NULL AND utm_medium != ''
+  AND ({filter})
+ORDER BY utm_medium
+"""
+
+
+@app.get("/api/cjm")
+def get_cjm(
+    min_transitions: int = Query(10, ge=0),
+    device: str = Query("all"),
+    utm_medium: str | None = Query(None),
+    counter_id: int | None = Query(None),
+    user_id_type: str | None = Query(None),
+    user_id_value: str | None = Query(None),
+):
+    if device not in CJM_DEVICES:
+        raise HTTPException(status_code=400, detail="device: all, desktop, mobile или tablet")
+
+    if user_id_type and user_id_type not in ("counter_user_id_hash", "user_id"):
+        raise HTTPException(
+            status_code=400,
+            detail="user_id_type: counter_user_id_hash или user_id",
+        )
+
+    filter_sql, filter_params, warning = build_cjm_filter(
+        device, utm_medium, counter_id, user_id_type, user_id_value
+    )
+
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            if not cjm_tables_exist(cur):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Таблицы CJM не созданы. Нажмите «Пересчитать CJM».",
+                )
+
+            cur.execute(CJM_NODES_SQL.format(filter=filter_sql), filter_params)
+            all_nodes = []
+            for row in cur.fetchall():
+                all_nodes.append(
+                    {
+                        "id": row["id"],
+                        "visits": int(row["visits"]),
+                        "entries": int(row["entries"]),
+                        "exits": int(row["exits"]),
+                        "exit_rate": float(row["exit_rate"]) if row["exit_rate"] is not None else 0.0,
+                    }
+                )
+
+            cur.execute(
+                CJM_EDGES_SQL.format(filter=filter_sql),
+                [*filter_params, min_transitions],
+            )
+            edges = [
+                {
+                    "from": row["from"],
+                    "to": row["to"],
+                    "count": int(row["count"]),
+                    "unique_visits": int(row["unique_visits"]),
+                }
+                for row in cur.fetchall()
+            ]
+
+            pages_in_edges = set()
+            for edge in edges:
+                pages_in_edges.add(edge["from"])
+                pages_in_edges.add(edge["to"])
+
+            nodes = [
+                n for n in all_nodes
+                if n["id"] in pages_in_edges or n["id"] == "/"
+            ]
+
+    result: dict[str, Any] = {"nodes": nodes, "edges": edges}
+    if warning:
+        result["warning"] = warning
+    return result
+
+
+@app.get("/api/cjm/channels")
+def get_cjm_channels(
+    device: str = Query("all"),
+    counter_id: int | None = Query(None),
+):
+    if device not in CJM_DEVICES:
+        raise HTTPException(status_code=400, detail="device: all, desktop, mobile или tablet")
+
+    filter_sql, filter_params, _ = build_cjm_filter(device, None, counter_id)
+
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            if not cjm_tables_exist(cur):
+                return {"channels": []}
+            cur.execute(CJM_CHANNELS_SQL.format(filter=filter_sql), filter_params)
+            channels = [row["utm_medium"] for row in cur.fetchall()]
+    return {"channels": channels}
+
+
+@app.post("/api/cjm/refresh")
+def refresh_cjm():
+    try:
+        refresh_cjm_tables()
+    except Exception as exc:
+        logger.exception("CJM refresh failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"status": "ok", "message": "Таблицы CJM пересчитаны"}
+
+
+@app.get("/cjm")
+async def cjm_page():
+    return FileResponse("static/cjm.html")
+
+
 @app.get("/")
-def index():
+async def index():
     return FileResponse("static/index.html")
 
 

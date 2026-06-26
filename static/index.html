@@ -3,79 +3,299 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Яндекс Метрика — Logs API Loader</title>
+  <title>MetricaCJM — Загрузка данных</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/layout.css">
+  <link rel="stylesheet" href="/static/components.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
-  <div class="container">
-    <header>
-      <h1>Logs API Loader</h1>
-      <p class="subtitle">Выгрузка сырых данных Яндекс.Метрики в PostgreSQL</p>
+<body class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand">MetricaCJM</div>
+    <nav class="sidebar-nav">
+      <a class="nav-item nav-item--active" href="/">
+        <i data-lucide="database" class="nav-icon"></i>
+        <div class="nav-content">
+          <span class="nav-label">Загрузка данных</span>
+          <span class="nav-desc">Logs API → PostgreSQL</span>
+        </div>
+      </a>
+      <a class="nav-item" href="/cjm">
+        <i data-lucide="share-2" class="nav-icon"></i>
+        <div class="nav-content">
+          <span class="nav-label">CJM-граф</span>
+          <span class="nav-desc">Пути пользователей</span>
+        </div>
+      </a>
+      <div class="nav-item nav-item--soon">
+        <i data-lucide="filter" class="nav-icon nav-icon--muted"></i>
+        <div class="nav-content">
+          <span class="nav-label nav-label--muted">Воронка</span>
+          <span class="nav-desc">Каналы → конверсии</span>
+        </div>
+        <span class="nav-badge">скоро</span>
+      </div>
+      <div class="nav-item nav-item--soon">
+        <i data-lucide="message-square" class="nav-icon nav-icon--muted"></i>
+        <div class="nav-content">
+          <span class="nav-label nav-label--muted">AI-анализ</span>
+          <span class="nav-desc">Вопросы к данным</span>
+        </div>
+        <span class="nav-badge">в разработке</span>
+      </div>
+      <div class="nav-item nav-item--soon">
+        <i data-lucide="eye" class="nav-icon nav-icon--muted"></i>
+        <div class="nav-content">
+          <span class="nav-label nav-label--muted">Конкуренты</span>
+          <span class="nav-desc">Мониторинг Директа</span>
+        </div>
+        <span class="nav-badge">планируется</span>
+      </div>
+    </nav>
+    <div class="sidebar-status">
+      <button class="status-toggle" id="statusToggle" type="button">
+        <i data-lucide="file-text" style="width:12px;height:12px"></i>
+        <span>Статус проекта</span>
+        <i data-lucide="chevron-up" id="statusChevron" style="width:12px;height:12px;margin-left:auto"></i>
+      </button>
+      <div class="status-content" id="statusContent">
+        <pre id="statusText" class="status-text">Загрузка...</pre>
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <div class="sidebar-auth">
+        <span class="sidebar-auth-dot" id="sidebar-auth-dot"></span>
+        <span class="sidebar-auth-text" id="sidebar-auth-text">Войти</span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main-wrap">
+    <header class="topbar">
+      <div>
+        <div class="breadcrumb">Загрузка данных</div>
+        <div class="breadcrumb-sub">Выгрузка визитов и хитов из Logs API</div>
+      </div>
+      <div class="topbar-meta" id="topbar-meta"></div>
     </header>
 
-    <section class="card" id="settings-section">
-      <h2>Настройки</h2>
-      <div class="form-grid">
-        <label class="field field-wide">
-          <span>OAuth-токен</span>
-          <input type="password" id="token" autocomplete="off" placeholder="y0_…">
-        </label>
-        <div class="field-actions">
-          <button type="button" id="connect-btn">Подключить</button>
+    <main class="main-content">
+      <!-- Состояние данных -->
+      <section class="card" id="stats-section">
+        <div class="stats-header">
+          <div>
+            <h2 class="card-title" style="margin:0">Состояние данных в БД</h2>
+            <p class="stats-updated" id="stats-updated"></p>
+          </div>
+          <button type="button" id="stats-refresh-btn" class="btn btn-ghost stats-refresh-btn">
+            <i data-lucide="refresh-cw"></i>
+            Обновить
+          </button>
         </div>
-        <label class="field field-wide">
-          <span>Счётчик</span>
-          <select id="counter" disabled>
-            <option value="">— выберите счётчик —</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Дата от</span>
-          <input type="date" id="date-from">
-        </label>
-        <label class="field">
-          <span>Дата до</span>
-          <input type="date" id="date-to">
-        </label>
-        <div class="field-actions field-wide">
-          <button type="button" id="export-btn" disabled>Сформировать отчёт</button>
+        <div class="stats-table-wrap">
+          <table class="stats-table" id="stats-table">
+            <thead>
+              <tr>
+                <th>Счётчик</th>
+                <th>Визиты</th>
+                <th>Хиты</th>
+                <th>Период</th>
+                <th>Пропуски</th>
+              </tr>
+            </thead>
+            <tbody id="stats-tbody"></tbody>
+          </table>
         </div>
-      </div>
-      <p class="error" id="settings-error" hidden></p>
-    </section>
+      </section>
 
-    <section class="card hidden" id="status-section">
-      <h2>Статус выгрузки</h2>
-      <div class="progress-wrap">
-        <div class="progress-bar" id="progress-bar"></div>
-      </div>
-      <p class="status-message" id="status-message"></p>
-      <p class="status-meta" id="status-meta"></p>
-      <div class="preview-actions hidden" id="preview-actions">
-        <button type="button" id="show-visits-btn">Показать визиты</button>
-        <button type="button" id="show-hits-btn">Показать события</button>
-      </div>
-    </section>
-
-    <section class="card hidden" id="preview-section">
-      <div class="preview-header">
-        <h2>Превью данных</h2>
-        <div class="preview-controls">
-          <span id="preview-total"></span>
-          <div class="toggle-group">
-            <button type="button" class="toggle active" data-table="visits">Визиты</button>
-            <button type="button" class="toggle" data-table="hits">События</button>
+      <!-- Данные в базе -->
+      <section class="card" id="db-preview-section">
+        <div class="db-preview-header">
+          <div>
+            <h2 class="card-title" style="margin:0">Данные в базе</h2>
+            <p class="db-preview-sub">Просмотр строк в PostgreSQL</p>
+          </div>
+          <div class="db-preview-controls">
+            <label class="field field--counter">
+              <span class="field-label">Счётчик</span>
+              <select id="db-preview-counter">
+                <option value="">Все счётчики</option>
+              </select>
+            </label>
+            <div class="toggle-group">
+              <button type="button" class="toggle btn db-preview-tab active" data-table="visits">Визиты</button>
+              <button type="button" class="toggle btn db-preview-tab" data-table="hits">Хиты</button>
+            </div>
           </div>
         </div>
+        <div class="db-preview-body" id="db-preview-body">
+          <div class="db-preview-loading hidden" id="db-preview-loading">
+            <i data-lucide="loader-circle" class="db-preview-spinner"></i>
+            <span>Загрузка…</span>
+          </div>
+          <div class="table-wrap db-preview-table-wrap">
+            <table class="db-preview-table" id="db-preview-table">
+              <thead id="db-preview-thead"></thead>
+              <tbody id="db-preview-tbody"></tbody>
+            </table>
+          </div>
+          <div class="db-preview-pagination" id="db-preview-pagination">
+            <span class="db-preview-range" id="db-preview-range">—</span>
+            <div class="db-preview-nav">
+              <button type="button" id="db-preview-prev" class="btn btn-ghost" disabled>Пред</button>
+              <button type="button" id="db-preview-next" class="btn btn-ghost" disabled>След</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- OAuth -->
+      <section class="card hidden" id="auth-card">
+        <h2 class="card-title">Подключение к Яндекс Метрике</h2>
+        <ol class="auth-steps">
+          <li>
+            Шаг 1. Создайте приложение на
+            <a href="https://oauth.yandex.ru/" target="_blank" rel="noopener noreferrer">oauth.yandex.ru</a>
+          </li>
+          <li>
+            Шаг 2. Скопируйте ClientID и вставьте сюда:
+            <div class="auth-step-row">
+              <input type="text" id="client-id" autocomplete="off" placeholder="ClientID">
+              <button type="button" id="get-token-btn" class="btn btn-secondary">Получить токен →</button>
+            </div>
+          </li>
+          <li>
+            Шаг 3. Яндекс выдаст токен в URL после <code>#access_token=</code>
+            <br>Скопируйте его и вставьте:
+            <div class="auth-step-row">
+              <input type="password" id="token" autocomplete="off" placeholder="OAuth-токен y0_…">
+              <button type="button" id="connect-btn" class="btn btn-primary">Подключить</button>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <div class="auth-compact hidden" id="auth-status">
+        <span class="auth-dot"></span>
+        <span>Подключено (<span id="token-hint"></span>)</span>
+        <button type="button" id="change-token-btn" class="btn btn-ghost auth-change-btn">Сменить токен</button>
       </div>
-      <div class="table-wrap">
-        <table id="preview-table">
-          <thead></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </section>
+
+      <!-- Параметры выгрузки -->
+      <section class="card" id="export-section">
+        <h2 class="card-title">Параметры выгрузки</h2>
+        <div class="form-row">
+          <label class="field field--counter">
+            <span class="field-label">Счётчик</span>
+            <select id="counter" disabled>
+              <option value="">— выберите счётчик —</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Дата начала</span>
+            <input type="date" id="date-from" disabled>
+          </label>
+          <label class="field">
+            <span class="field-label">Дата конца</span>
+            <input type="date" id="date-to" disabled>
+          </label>
+        </div>
+
+        <div class="period-row">
+          <span class="period-label">Период:</span>
+          <button type="button" class="period-btn" data-period="yesterday">Вчера</button>
+          <button type="button" class="period-btn" data-period="week">Неделя</button>
+          <button type="button" class="period-btn" data-period="month">Месяц</button>
+          <button type="button" class="period-btn" data-period="quarter">Квартал</button>
+        </div>
+
+        <p class="error" id="settings-error" hidden></p>
+
+        <div class="export-actions">
+          <button type="button" id="export-btn" class="btn btn-primary" disabled>Загрузить данные</button>
+        </div>
+      </section>
+
+      <!-- Прогресс -->
+      <section class="card hidden" id="status-section">
+        <h2 class="card-title">Прогресс выгрузки</h2>
+
+        <div class="progress-group">
+          <div class="progress-header">
+            <span class="progress-label">Визиты</span>
+            <span class="progress-value" id="progress-visits-text">0%</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" id="progress-bar-visits"></div>
+          </div>
+        </div>
+
+        <div class="progress-group">
+          <div class="progress-header">
+            <span class="progress-label">Хиты</span>
+            <span class="progress-value" id="progress-hits-text">0%</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" id="progress-bar-hits"></div>
+          </div>
+        </div>
+
+        <div class="progress-bar hidden" id="progress-bar" aria-hidden="true"></div>
+        <p class="status-message" id="status-message"></p>
+        <p class="status-meta hidden" id="status-meta"></p>
+
+        <div class="log-window" id="log-window"></div>
+      </section>
+
+      <!-- Результат -->
+      <section class="card hidden" id="result-section">
+        <h2 class="card-title">Результат</h2>
+        <div class="stat-grid">
+          <div class="stat-block">
+            <div class="stat-value" id="result-visits">0</div>
+            <div class="stat-label">Визитов загружено</div>
+          </div>
+          <div class="stat-block">
+            <div class="stat-value" id="result-hits">0</div>
+            <div class="stat-label">Хитов загружено</div>
+          </div>
+        </div>
+        <div class="result-actions">
+          <a href="/cjm" class="btn btn-primary">Перейти к CJM-графу</a>
+          <button type="button" id="show-visits-btn" class="btn btn-secondary">Превью визитов</button>
+          <button type="button" id="show-hits-btn" class="btn btn-secondary">Превью хитов</button>
+        </div>
+        <div class="preview-actions hidden" id="preview-actions"></div>
+      </section>
+
+      <!-- Превью -->
+      <section class="card hidden" id="preview-section">
+        <div class="preview-header">
+          <h2 class="card-title" style="margin:0">Превью данных</h2>
+          <div class="preview-controls">
+            <span id="preview-total"></span>
+            <div class="toggle-group">
+              <button type="button" class="toggle btn active" data-table="visits">Визиты</button>
+              <button type="button" class="toggle btn" data-table="hits">Хиты</button>
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="preview-table">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
   </div>
+
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script src="/static/layout.js"></script>
   <script src="/static/app.js"></script>
+  <script>lucide.createIcons();</script>
 </body>
 </html>

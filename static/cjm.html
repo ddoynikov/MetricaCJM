@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MetricaCJM — CJM-граф</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/layout.css">
+  <link rel="stylesheet" href="/static/components.css">
+  <link rel="stylesheet" href="/static/cjm.css">
+</head>
+<body class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand">MetricaCJM</div>
+    <nav class="sidebar-nav">
+      <a class="nav-item" href="/">
+        <i data-lucide="database" class="nav-icon"></i>
+        <div class="nav-content">
+          <span class="nav-label">Загрузка данных</span>
+          <span class="nav-desc">Logs API → PostgreSQL</span>
+        </div>
+      </a>
+      <a class="nav-item nav-item--active" href="/cjm">
+        <i data-lucide="share-2" class="nav-icon"></i>
+        <div class="nav-content">
+          <span class="nav-label">CJM-граф</span>
+          <span class="nav-desc">Пути пользователей</span>
+        </div>
+      </a>
+      <div class="nav-item nav-item--soon">
+        <i data-lucide="filter" class="nav-icon nav-icon--muted"></i>
+        <div class="nav-content">
+          <span class="nav-label nav-label--muted">Воронка</span>
+          <span class="nav-desc">Каналы → конверсии</span>
+        </div>
+        <span class="nav-badge">скоро</span>
+      </div>
+      <div class="nav-item nav-item--soon">
+        <i data-lucide="message-square" class="nav-icon nav-icon--muted"></i>
+        <div class="nav-content">
+          <span class="nav-label nav-label--muted">AI-анализ</span>
+          <span class="nav-desc">Вопросы к данным</span>
+        </div>
+        <span class="nav-badge">в разработке</span>
+      </div>
+      <div class="nav-item nav-item--soon">
+        <i data-lucide="eye" class="nav-icon nav-icon--muted"></i>
+        <div class="nav-content">
+          <span class="nav-label nav-label--muted">Конкуренты</span>
+          <span class="nav-desc">Мониторинг Директа</span>
+        </div>
+        <span class="nav-badge">планируется</span>
+      </div>
+    </nav>
+    <div class="sidebar-status">
+      <button class="status-toggle" id="statusToggle" type="button">
+        <i data-lucide="file-text" style="width:12px;height:12px"></i>
+        <span>Статус проекта</span>
+        <i data-lucide="chevron-up" id="statusChevron" style="width:12px;height:12px;margin-left:auto"></i>
+      </button>
+      <div class="status-content" id="statusContent">
+        <pre id="statusText" class="status-text">Загрузка...</pre>
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <div class="sidebar-auth hidden" id="cjm-auth-status">
+        <span class="sidebar-auth-dot connected"></span>
+        <span class="sidebar-auth-text">Метрика подключена (<span id="token-hint"></span>)</span>
+      </div>
+      <div class="sidebar-auth" id="cjm-auth-offline">
+        <span class="sidebar-auth-dot"></span>
+        <span class="sidebar-auth-text"><a href="/">Войти</a></span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main-wrap">
+    <header class="topbar">
+      <div>
+        <div class="breadcrumb">CJM-граф</div>
+        <div class="breadcrumb-sub" id="cjm-meta">Пути пользователей между страницами</div>
+      </div>
+      <div class="topbar-meta" id="topbar-counter"></div>
+    </header>
+
+    <div class="banner banner-warning hidden" id="auth-banner">
+      Сначала подключитесь на <a href="/">странице загрузки</a>
+    </div>
+
+    <div class="cjm-filterbar hidden" id="cjm-controls">
+      <label class="field field-compact">
+        <span class="field-label">Счётчик</span>
+        <select id="counter">
+          <option value="">— выберите —</option>
+        </select>
+      </label>
+      <label class="field field-compact">
+        <span class="field-label">Устройство</span>
+        <select id="device">
+          <option value="all">Все</option>
+          <option value="desktop">Desktop</option>
+          <option value="mobile">Mobile</option>
+          <option value="tablet">Tablet</option>
+        </select>
+      </label>
+      <label class="field field-compact">
+        <span class="field-label">UTM medium</span>
+        <select id="utm-medium">
+          <option value="">Все</option>
+        </select>
+      </label>
+      <div class="slider-wrap">
+        <label class="filter-label">
+          Мин. переходов
+          <span class="help-icon" title="Порог фильтрации: скрывает пути с количеством переходов ниже указанного. Повышайте значение для упрощения графа, понижайте — для детализации.">?</span>
+        </label>
+        <div class="slider-row">
+          <input type="range" id="minTransitions" min="1" max="500" step="10" value="200">
+          <span id="minTransitionsValue" class="slider-value">200</span>
+        </div>
+      </div>
+      <div class="filterbar-actions">
+        <button type="button" id="find-user-btn" class="btn btn-secondary">Найти пользователя</button>
+        <button type="button" id="apply-btn" class="btn btn-primary">Обновить граф</button>
+        <button type="button" id="refresh-btn" class="btn btn-secondary">Пересчитать CJM</button>
+      </div>
+      <p class="error filterbar-error" id="cjm-error" hidden></p>
+    </div>
+
+    <div class="cjm-user-search hidden" id="user-search-bar">
+      <span class="user-search-label">Идентификатор:</span>
+      <select id="user-id-type">
+        <option value="counter_user_id_hash">Хэш пользователя (Метрика)</option>
+        <option value="user_id">UserID (CRM)</option>
+      </select>
+      <input type="text" id="user-id-value" placeholder="Введите хэш пользователя">
+      <button type="button" id="user-search-btn" class="btn btn-primary">Найти</button>
+      <button type="button" id="user-search-clear" class="btn btn-ghost" aria-label="Сбросить">✕</button>
+    </div>
+
+    <main class="main-content main-content--flush hidden" id="cjm-main">
+      <div class="cjm-graph-area">
+        <div id="cy"></div>
+        <div class="cjm-legend">
+          <div class="cjm-legend-title">Легенда</div>
+          <div class="cjm-legend-item"><span class="legend-swatch legend-entry"></span> Вход на сайт</div>
+          <div class="cjm-legend-item"><span class="legend-swatch legend-content"></span> Контент</div>
+          <div class="cjm-legend-item"><span class="legend-swatch legend-funnel"></span> Воронка</div>
+          <div class="cjm-legend-item"><span class="legend-swatch legend-conversion"></span> Конверсия</div>
+          <div class="cjm-legend-hint">— Ширина линии = кол-во переходов</div>
+          <div class="cjm-legend-hint">○ Размер узла = визиты</div>
+        </div>
+        <div class="cjm-zoom-panel">
+          <button type="button" id="zoom-in" class="btn-icon" title="Увеличить">+</button>
+          <button type="button" id="zoom-out" class="btn-icon" title="Уменьшить">−</button>
+          <button type="button" id="zoom-fit" class="btn-icon" title="Вписать граф">
+            <i data-lucide="maximize-2"></i>
+          </button>
+        </div>
+        <div id="tooltip" hidden></div>
+        <p class="cjm-empty hidden" id="cjm-empty">Нет данных для отображения</p>
+      </div>
+
+      <aside class="cjm-node-panel hidden" id="sidebar">
+        <div class="cjm-node-panel-header">
+          <h2 id="sb-page">—</h2>
+          <button type="button" id="sidebar-close" class="btn btn-ghost" aria-label="Закрыть">✕</button>
+        </div>
+        <a id="nodePageLink" href="#" target="_blank" rel="noopener noreferrer" class="node-page-link">
+          Открыть страницу ↗
+        </a>
+        <dl class="metric-list">
+          <dt>Уникальные визиты</dt>
+          <dd id="sb-visits"></dd>
+          <dt>Входы</dt>
+          <dd id="sb-entries"></dd>
+          <dt>Выходы</dt>
+          <dd id="sb-exits"></dd>
+          <dt>Exit rate</dt>
+          <dd id="sb-exit-rate"></dd>
+        </dl>
+        <div class="transitions-block">
+          <h3>Входящие</h3>
+          <ul id="sb-incoming" class="transitions-list"></ul>
+        </div>
+        <div class="transitions-block">
+          <h3>Исходящие</h3>
+          <ul id="sb-outgoing" class="transitions-list"></ul>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script src="/static/layout.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+  <script src="/static/cjm.js"></script>
+  <script>lucide.createIcons();</script>
+</body>
+</html>
