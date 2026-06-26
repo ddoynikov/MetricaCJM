@@ -6,11 +6,13 @@ const tokenInput = document.getElementById("token");
 const connectBtn = document.getElementById("connect-btn");
 const changeTokenBtn = document.getElementById("change-token-btn");
 const authCard = document.getElementById("auth-card");
-const authStatus = document.getElementById("auth-status");
-const tokenHintEl = document.getElementById("token-hint");
+const authModal = document.getElementById("auth-modal");
+const authModalBackdrop = document.getElementById("auth-modal-backdrop");
+const authModalClose = document.getElementById("auth-modal-close");
+const sidebarAuth = document.getElementById("sidebar-auth");
 const counterSelect = document.getElementById("counter");
-const dateFromInput = document.getElementById("date-from");
-const dateToInput = document.getElementById("date-to");
+const dateFromInput = document.getElementById("dateFrom");
+const dateToInput = document.getElementById("dateTo");
 const exportBtn = document.getElementById("export-btn");
 const settingsError = document.getElementById("settings-error");
 const topbarMeta = document.getElementById("topbar-meta");
@@ -20,8 +22,9 @@ const periodButtons = document.querySelectorAll(".period-btn");
 const statsRefreshBtn = document.getElementById("stats-refresh-btn");
 const statsUpdatedEl = document.getElementById("stats-updated");
 const statsTbody = document.getElementById("stats-tbody");
+const toggleDataTableBtn = document.getElementById("toggleDataTable");
+const dataSection = document.getElementById("dataTableSection");
 
-const dbPreviewSection = document.getElementById("db-preview-section");
 const dbPreviewCounter = document.getElementById("db-preview-counter");
 const dbPreviewBody = document.getElementById("db-preview-body");
 const dbPreviewLoading = document.getElementById("db-preview-loading");
@@ -60,10 +63,17 @@ let countersList = [];
 let statsByCounter = new Map();
 let dbPreviewTable = "visits";
 let dbPreviewOffset = 0;
-const DB_PREVIEW_LIMIT = 50;
+const DB_PREVIEW_LIMIT = 25;
+let dateFrom = "";
+let dateTo = "";
+let fpFrom = null;
+let fpTo = null;
 
 function formatDate(date) {
-  return date.toISOString().slice(0, 10);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 function yesterday() {
@@ -72,12 +82,44 @@ function yesterday() {
   return d;
 }
 
-function setDefaultDates() {
+function isDataSectionVisible() {
+  return dataSection && dataSection.style.display !== "none";
+}
+
+function initFlatpickr() {
   const end = yesterday();
   const start = new Date(end);
   start.setDate(end.getDate() - 7);
-  dateToInput.value = formatDate(end);
-  dateFromInput.value = formatDate(start);
+  dateFrom = formatDate(start);
+  dateTo = formatDate(end);
+
+  fpFrom = flatpickr("#dateFrom", {
+    locale: "ru",
+    dateFormat: "d.m.Y",
+    defaultDate: start,
+    onChange: (selectedDates) => {
+      if (selectedDates[0]) {
+        dateFrom = formatDate(selectedDates[0]);
+        periodButtons.forEach((btn) => btn.classList.remove("active"));
+        updateExportButtonState();
+        updateTopbarMeta();
+      }
+    },
+  });
+
+  fpTo = flatpickr("#dateTo", {
+    locale: "ru",
+    dateFormat: "d.m.Y",
+    defaultDate: end,
+    onChange: (selectedDates) => {
+      if (selectedDates[0]) {
+        dateTo = formatDate(selectedDates[0]);
+        periodButtons.forEach((btn) => btn.classList.remove("active"));
+        updateExportButtonState();
+        updateTopbarMeta();
+      }
+    },
+  });
 }
 
 function applyPeriod(period) {
@@ -92,8 +134,10 @@ function applyPeriod(period) {
   } else if (period === "quarter") {
     start.setDate(end.getDate() - 90);
   }
-  dateFromInput.value = formatDate(start);
-  dateToInput.value = formatDate(end);
+  dateFrom = formatDate(start);
+  dateTo = formatDate(end);
+  if (fpFrom) fpFrom.setDate(start);
+  if (fpTo) fpTo.setDate(end);
   periodButtons.forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.period === period);
   });
@@ -106,22 +150,40 @@ function showError(message) {
   settingsError.hidden = !message;
 }
 
-function updateSidebarAuth(connected) {
+function showAuthModal() {
+  if (!authModal) return;
+  authModal.classList.remove("hidden");
+  authModal.setAttribute("aria-hidden", "false");
+}
+
+function hideAuthModal() {
+  if (!authModal) return;
+  authModal.classList.add("hidden");
+  authModal.setAttribute("aria-hidden", "true");
+}
+
+function updateSidebarAuth(connected, tokenHint = "") {
   if (sidebarAuthDot) {
     sidebarAuthDot.classList.toggle("connected", connected);
   }
   if (sidebarAuthText) {
-    sidebarAuthText.textContent = connected ? "Метрика подключена" : "Войти";
+    sidebarAuthText.textContent = connected
+      ? `Метрика подключена (${tokenHint || "…"})`
+      : "Войти";
+  }
+  if (changeTokenBtn) {
+    changeTokenBtn.classList.toggle("hidden", !connected);
+  }
+  if (sidebarAuth) {
+    sidebarAuth.classList.toggle("sidebar-auth--clickable", !connected);
   }
 }
 
 function updateTopbarMeta() {
   if (!topbarMeta) return;
   const counter = counterSelect.selectedOptions[0]?.textContent || "";
-  const from = dateFromInput.value;
-  const to = dateToInput.value;
-  if (counter && counter !== "— выберите счётчик —" && from && to) {
-    topbarMeta.textContent = `${counter} · ${from} — ${to}`;
+  if (counter && counter !== "— выберите счётчик —" && dateFrom && dateTo) {
+    topbarMeta.textContent = `${counter} · ${dateFrom} — ${dateTo}`;
   } else {
     topbarMeta.textContent = "";
   }
@@ -146,8 +208,10 @@ function setProgress(pct) {
 
 function setFormEnabled(enabled) {
   counterSelect.disabled = !enabled;
-  dateFromInput.disabled = !enabled;
-  dateToInput.disabled = !enabled;
+  if (fpFrom?.input) fpFrom.input.disabled = !enabled;
+  if (fpTo?.input) fpTo.input.disabled = !enabled;
+  if (fpFrom) fpFrom.set("clickOpens", enabled);
+  if (fpTo) fpTo.set("clickOpens", enabled);
   updateExportButtonState();
 }
 
@@ -155,36 +219,32 @@ function updateExportButtonState() {
   const ready =
     authorized &&
     counterSelect.value &&
-    dateFromInput.value &&
-    dateToInput.value &&
-    dateFromInput.value <= dateToInput.value;
+    dateFrom &&
+    dateTo &&
+    dateFrom <= dateTo;
   exportBtn.disabled = !ready;
 }
 
 function showLoginForm() {
   authorized = false;
-  authCard.classList.remove("hidden");
-  authStatus.classList.add("hidden");
   tokenInput.value = "";
   counterSelect.innerHTML = '<option value="">— выберите счётчик —</option>';
   setFormEnabled(false);
   updateSidebarAuth(false);
   updateTopbarMeta();
+  showAuthModal();
 }
 
 function showTokenChangeForm() {
-  authCard.classList.remove("hidden");
-  authStatus.classList.add("hidden");
   tokenInput.value = "";
   showError("");
+  showAuthModal();
 }
 
 function showAuthorizedUi(tokenHint) {
   authorized = true;
-  authCard.classList.add("hidden");
-  authStatus.classList.remove("hidden");
-  tokenHintEl.textContent = tokenHint || "";
-  updateSidebarAuth(true);
+  hideAuthModal();
+  updateSidebarAuth(true, tokenHint);
 }
 
 function renderCounters(counters) {
@@ -360,6 +420,10 @@ function formatDbCell(value) {
   return String(value);
 }
 
+function formatColumnHeader(column) {
+  return column.replace(/^ym:s:/, "").replace(/^ym:pv:/, "");
+}
+
 function setDbPreviewLoading(loading) {
   if (!dbPreviewBody) return;
   dbPreviewBody.classList.toggle("is-loading", loading);
@@ -394,7 +458,8 @@ function renderDbPreviewTable(columns, rows) {
   const headerRow = document.createElement("tr");
   columns.forEach((column) => {
     const th = document.createElement("th");
-    th.textContent = column;
+    th.textContent = formatColumnHeader(column);
+    th.title = column;
     headerRow.appendChild(th);
   });
   dbPreviewThead.appendChild(headerRow);
@@ -403,8 +468,9 @@ function renderDbPreviewTable(columns, rows) {
     const tr = document.createElement("tr");
     row.forEach((cell) => {
       const td = document.createElement("td");
-      td.textContent = formatDbCell(cell);
-      td.title = td.textContent;
+      const text = formatDbCell(cell);
+      td.textContent = text;
+      td.title = text;
       tr.appendChild(td);
     });
     dbPreviewTbody.appendChild(tr);
@@ -412,7 +478,7 @@ function renderDbPreviewTable(columns, rows) {
 }
 
 async function loadDbPreview() {
-  if (!dbPreviewSection) return;
+  if (!dataSection) return;
 
   setDbPreviewLoading(true);
 
@@ -446,13 +512,15 @@ async function loadDbPreview() {
   }
 }
 
+const loadTablePreview = loadDbPreview;
+
 function switchDbPreviewTable(table) {
   dbPreviewTable = table;
   dbPreviewOffset = 0;
   dbPreviewTabs.forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.table === table);
   });
-  loadDbPreview();
+  loadTablePreview();
 }
 
 async function loadStats() {
@@ -484,7 +552,9 @@ async function loadStats() {
       statsRefreshBtn.disabled = false;
     }
   }
-  await loadDbPreview();
+  if (isDataSectionVisible()) {
+    await loadTablePreview();
+  }
 }
 
 function openOAuthAuthorize() {
@@ -551,8 +621,6 @@ async function connect() {
 }
 
 async function initAuth() {
-  authCard.classList.remove("hidden");
-
   try {
     const response = await fetch("/api/auth/status", FETCH_OPTS);
     const data = await response.json();
@@ -615,8 +683,6 @@ async function pollStatus(jobId) {
 
 async function startExport() {
   const counterId = Number(counterSelect.value);
-  const dateFrom = dateFromInput.value;
-  const dateTo = dateToInput.value;
 
   if (!authorized || !counterId || !dateFrom || !dateTo) {
     showError("Заполните все поля");
@@ -683,8 +749,8 @@ async function loadPreview(table) {
   const params = new URLSearchParams({
     counter_id: counterSelect.value,
     table,
-    date_from: dateFromInput.value,
-    date_to: dateToInput.value,
+    date_from: dateFrom,
+    date_to: dateTo,
   });
 
   previewSection.classList.remove("hidden");
@@ -735,16 +801,6 @@ tokenInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") connect();
 });
 exportBtn.addEventListener("click", startExport);
-dateFromInput.addEventListener("change", () => {
-  periodButtons.forEach((btn) => btn.classList.remove("active"));
-  updateExportButtonState();
-  updateTopbarMeta();
-});
-dateToInput.addEventListener("change", () => {
-  periodButtons.forEach((btn) => btn.classList.remove("active"));
-  updateExportButtonState();
-  updateTopbarMeta();
-});
 counterSelect.addEventListener("change", () => {
   updateExportButtonState();
   updateTopbarMeta();
@@ -753,24 +809,56 @@ showVisitsBtn.addEventListener("click", () => loadPreview("visits"));
 showHitsBtn.addEventListener("click", () => loadPreview("hits"));
 statsRefreshBtn.addEventListener("click", loadStats);
 
+if (sidebarAuth) {
+  sidebarAuth.addEventListener("click", () => {
+    if (!authorized) showAuthModal();
+  });
+  sidebarAuth.addEventListener("keydown", (event) => {
+    if (!authorized && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      showAuthModal();
+    }
+  });
+}
+
+if (authModalBackdrop) {
+  authModalBackdrop.addEventListener("click", hideAuthModal);
+}
+if (authModalClose) {
+  authModalClose.addEventListener("click", hideAuthModal);
+}
+
+const toggleBtn = document.getElementById("toggleDataTable");
+if (toggleBtn && dataSection) {
+  toggleBtn.addEventListener("click", () => {
+    const isHidden = dataSection.style.display === "none" || dataSection.style.display === "";
+    dataSection.style.display = isHidden ? "block" : "none";
+    toggleBtn.innerHTML = isHidden
+      ? '<i data-lucide="eye-off" style="width:14px;height:14px"></i> Скрыть данные'
+      : '<i data-lucide="table" style="width:14px;height:14px"></i> Посмотреть данные в БД';
+    lucide.createIcons();
+    if (isHidden) loadTablePreview();
+  });
+}
+
 if (dbPreviewCounter) {
   dbPreviewCounter.addEventListener("change", () => {
     dbPreviewOffset = 0;
-    loadDbPreview();
+    loadTablePreview();
   });
 }
 
 if (dbPreviewPrev) {
   dbPreviewPrev.addEventListener("click", () => {
     dbPreviewOffset = Math.max(0, dbPreviewOffset - DB_PREVIEW_LIMIT);
-    loadDbPreview();
+    loadTablePreview();
   });
 }
 
 if (dbPreviewNext) {
   dbPreviewNext.addEventListener("click", () => {
     dbPreviewOffset += DB_PREVIEW_LIMIT;
-    loadDbPreview();
+    loadTablePreview();
   });
 }
 
@@ -786,6 +874,6 @@ toggleButtons.forEach((btn) => {
   btn.addEventListener("click", () => loadPreview(btn.dataset.table));
 });
 
-setDefaultDates();
+initFlatpickr();
 setFormEnabled(false);
 initAuth();

@@ -909,7 +909,19 @@ def table_preview(
             [serialize_row_value(row[col], col in array_cols) for col in cols]
         )
 
-    return {"columns": cols, "rows": serialized_rows, "total": total}
+    non_empty_cols: list[int] = []
+    for i, _col in enumerate(cols):
+        has_value = any(
+            row[i] is not None and str(row[i]).strip() != ""
+            for row in serialized_rows
+        )
+        if has_value:
+            non_empty_cols.append(i)
+
+    filtered_col_names = [cols[i] for i in non_empty_cols]
+    filtered_rows = [[row[i] for i in non_empty_cols] for row in serialized_rows]
+
+    return {"columns": filtered_col_names, "rows": filtered_rows, "total": total}
 
 
 @app.get("/api/project-status")

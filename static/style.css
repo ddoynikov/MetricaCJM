@@ -317,10 +317,46 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   overflow: auto;
 }
 
-.db-preview-table th,
-.db-preview-table td {
+.stats-toggle-data {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.data-table-wrap {
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+}
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
+}
+.data-table th {
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+}
+.data-table td {
+  padding: 6px 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.data-table tr:hover td {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .db-preview-pagination {
@@ -341,4 +377,110 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .db-preview-nav {
   display: flex;
   gap: var(--space-2);
+}
+
+.sidebar-auth--clickable {
+  cursor: pointer;
+}
+
+.sidebar-auth--clickable:hover .sidebar-auth-text {
+  color: var(--text-primary);
+}
+
+.sidebar-change-token {
+  width: 100%;
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  justify-content: flex-start;
+  padding-left: 0;
+}
+
+.auth-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
+
+.auth-modal.hidden {
+  display: none;
+}
+
+.auth-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.auth-modal-panel {
+  position: relative;
+  z-index: 1;
+  width: min(560px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  margin: 0;
+}
+
+.auth-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.flatpickr-calendar {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border-default) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+  font-family: var(--font-sans) !important;
+}
+.flatpickr-day {
+  color: var(--text-secondary) !important;
+  border-radius: var(--radius-sm) !important;
+}
+.flatpickr-day:hover {
+  background: var(--bg-hover) !important;
+  color: var(--text-primary) !important;
+}
+.flatpickr-day.selected {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #fff !important;
+}
+.flatpickr-day.today {
+  border-color: var(--accent) !important;
+}
+.flatpickr-months .flatpickr-month,
+.flatpickr-weekdays,
+.flatpickr-weekday {
+  background: var(--bg-elevated) !important;
+  color: var(--text-muted) !important;
+}
+.flatpickr-current-month,
+.flatpickr-current-month .numInputWrapper input {
+  color: var(--text-primary) !important;
+}
+.flatpickr-prev-month svg,
+.flatpickr-next-month svg {
+  fill: var(--text-secondary) !important;
+}
+.flatpickr-input {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border-default) !important;
+  border-radius: var(--radius-md) !important;
+  color: var(--text-primary) !important;
+  padding: 8px 12px !important;
+  font-family: var(--font-sans) !important;
+  font-size: var(--text-base) !important;
+  width: 100% !important;
+  cursor: pointer !important;
+}
+.flatpickr-input:focus {
+  outline: none !important;
+  border-color: var(--accent) !important;
 }

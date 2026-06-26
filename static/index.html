@@ -11,6 +11,9 @@
   <link rel="stylesheet" href="/static/layout.css">
   <link rel="stylesheet" href="/static/components.css">
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
 </head>
 <body class="app-shell">
   <aside class="sidebar">
@@ -66,10 +69,11 @@
       </div>
     </div>
     <div class="sidebar-footer">
-      <div class="sidebar-auth">
+      <div class="sidebar-auth sidebar-auth--clickable" id="sidebar-auth" role="button" tabindex="0">
         <span class="sidebar-auth-dot" id="sidebar-auth-dot"></span>
         <span class="sidebar-auth-text" id="sidebar-auth-text">Войти</span>
       </div>
+      <button type="button" class="btn btn-ghost sidebar-change-token hidden" id="change-token-btn">Сменить токен</button>
     </div>
   </aside>
 
@@ -109,80 +113,11 @@
             <tbody id="stats-tbody"></tbody>
           </table>
         </div>
+        <button type="button" id="toggleDataTable" class="btn btn-secondary stats-toggle-data">
+          <i data-lucide="table" style="width:14px;height:14px"></i>
+          Посмотреть данные в БД
+        </button>
       </section>
-
-      <!-- Данные в базе -->
-      <section class="card" id="db-preview-section">
-        <div class="db-preview-header">
-          <div>
-            <h2 class="card-title" style="margin:0">Данные в базе</h2>
-            <p class="db-preview-sub">Просмотр строк в PostgreSQL</p>
-          </div>
-          <div class="db-preview-controls">
-            <label class="field field--counter">
-              <span class="field-label">Счётчик</span>
-              <select id="db-preview-counter">
-                <option value="">Все счётчики</option>
-              </select>
-            </label>
-            <div class="toggle-group">
-              <button type="button" class="toggle btn db-preview-tab active" data-table="visits">Визиты</button>
-              <button type="button" class="toggle btn db-preview-tab" data-table="hits">Хиты</button>
-            </div>
-          </div>
-        </div>
-        <div class="db-preview-body" id="db-preview-body">
-          <div class="db-preview-loading hidden" id="db-preview-loading">
-            <i data-lucide="loader-circle" class="db-preview-spinner"></i>
-            <span>Загрузка…</span>
-          </div>
-          <div class="table-wrap db-preview-table-wrap">
-            <table class="db-preview-table" id="db-preview-table">
-              <thead id="db-preview-thead"></thead>
-              <tbody id="db-preview-tbody"></tbody>
-            </table>
-          </div>
-          <div class="db-preview-pagination" id="db-preview-pagination">
-            <span class="db-preview-range" id="db-preview-range">—</span>
-            <div class="db-preview-nav">
-              <button type="button" id="db-preview-prev" class="btn btn-ghost" disabled>Пред</button>
-              <button type="button" id="db-preview-next" class="btn btn-ghost" disabled>След</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- OAuth -->
-      <section class="card hidden" id="auth-card">
-        <h2 class="card-title">Подключение к Яндекс Метрике</h2>
-        <ol class="auth-steps">
-          <li>
-            Шаг 1. Создайте приложение на
-            <a href="https://oauth.yandex.ru/" target="_blank" rel="noopener noreferrer">oauth.yandex.ru</a>
-          </li>
-          <li>
-            Шаг 2. Скопируйте ClientID и вставьте сюда:
-            <div class="auth-step-row">
-              <input type="text" id="client-id" autocomplete="off" placeholder="ClientID">
-              <button type="button" id="get-token-btn" class="btn btn-secondary">Получить токен →</button>
-            </div>
-          </li>
-          <li>
-            Шаг 3. Яндекс выдаст токен в URL после <code>#access_token=</code>
-            <br>Скопируйте его и вставьте:
-            <div class="auth-step-row">
-              <input type="password" id="token" autocomplete="off" placeholder="OAuth-токен y0_…">
-              <button type="button" id="connect-btn" class="btn btn-primary">Подключить</button>
-            </div>
-          </li>
-        </ol>
-      </section>
-
-      <div class="auth-compact hidden" id="auth-status">
-        <span class="auth-dot"></span>
-        <span>Подключено (<span id="token-hint"></span>)</span>
-        <button type="button" id="change-token-btn" class="btn btn-ghost auth-change-btn">Сменить токен</button>
-      </div>
 
       <!-- Параметры выгрузки -->
       <section class="card" id="export-section">
@@ -196,11 +131,11 @@
           </label>
           <label class="field">
             <span class="field-label">Дата начала</span>
-            <input type="date" id="date-from" disabled>
+            <input type="text" id="dateFrom" placeholder="дд.мм.гггг" disabled readonly>
           </label>
           <label class="field">
             <span class="field-label">Дата конца</span>
-            <input type="date" id="date-to" disabled>
+            <input type="text" id="dateTo" placeholder="дд.мм.гггг" disabled readonly>
           </label>
         </div>
 
@@ -290,7 +225,79 @@
           </table>
         </div>
       </section>
+
+      <!-- 4. Данные в базе -->
+      <section class="card" id="dataTableSection" style="display:none">
+        <div class="db-preview-header">
+          <div>
+            <h2 class="card-title" style="margin:0">Данные в базе</h2>
+            <p class="db-preview-sub">Просмотр строк в PostgreSQL</p>
+          </div>
+          <div class="db-preview-controls">
+            <div class="toggle-group">
+              <button type="button" class="toggle btn db-preview-tab active" data-table="visits">Визиты</button>
+              <button type="button" class="toggle btn db-preview-tab" data-table="hits">Хиты</button>
+            </div>
+            <label class="field field--counter">
+              <span class="field-label">Счётчик</span>
+              <select id="db-preview-counter">
+                <option value="">Все счётчики</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="db-preview-body" id="db-preview-body">
+          <div class="db-preview-loading hidden" id="db-preview-loading">
+            <i data-lucide="loader-circle" class="db-preview-spinner"></i>
+            <span>Загрузка…</span>
+          </div>
+          <div class="data-table-wrap db-preview-table-wrap">
+            <table class="data-table" id="db-preview-table">
+              <thead id="db-preview-thead"></thead>
+              <tbody id="db-preview-tbody"></tbody>
+            </table>
+          </div>
+          <div class="db-preview-pagination" id="db-preview-pagination">
+            <span class="db-preview-range" id="db-preview-range">—</span>
+            <div class="db-preview-nav">
+              <button type="button" id="db-preview-prev" class="btn btn-ghost" disabled>Пред</button>
+              <button type="button" id="db-preview-next" class="btn btn-ghost" disabled>След</button>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
+  </div>
+
+  <div class="auth-modal hidden" id="auth-modal" aria-hidden="true">
+    <div class="auth-modal-backdrop" id="auth-modal-backdrop"></div>
+    <div class="auth-modal-panel card" id="auth-card">
+      <div class="auth-modal-header">
+        <h2 class="card-title" style="margin:0">Подключение к Яндекс Метрике</h2>
+        <button type="button" class="btn btn-ghost" id="auth-modal-close" aria-label="Закрыть">✕</button>
+      </div>
+      <ol class="auth-steps">
+        <li>
+          Шаг 1. Создайте приложение на
+          <a href="https://oauth.yandex.ru/" target="_blank" rel="noopener noreferrer">oauth.yandex.ru</a>
+        </li>
+        <li>
+          Шаг 2. Скопируйте ClientID и вставьте сюда:
+          <div class="auth-step-row">
+            <input type="text" id="client-id" autocomplete="off" placeholder="ClientID">
+            <button type="button" id="get-token-btn" class="btn btn-secondary">Получить токен →</button>
+          </div>
+        </li>
+        <li>
+          Шаг 3. Яндекс выдаст токен в URL после <code>#access_token=</code>
+          <br>Скопируйте его и вставьте:
+          <div class="auth-step-row">
+            <input type="password" id="token" autocomplete="off" placeholder="OAuth-токен y0_…">
+            <button type="button" id="connect-btn" class="btn btn-primary">Подключить</button>
+          </div>
+        </li>
+      </ol>
+    </div>
   </div>
 
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
