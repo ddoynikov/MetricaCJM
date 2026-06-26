@@ -1117,13 +1117,80 @@ def cjm_tables_exist(cur: psycopg.Cursor) -> bool:
 
 
 def refresh_cjm_tables() -> None:
-    with open(CJM_SCHEMA_SQL, encoding="utf-8") as f:
-        sql = f.read()
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(sql)
+            cur.execute("TRUNCATE app_metrica_cjm.transitions, app_metrica_cjm.page_metrics")
+            cur.execute(CJM_FILL_TRANSITIONS_SQL)
+            cur.execute(CJM_FILL_PAGE_METRICS_SQL)
         conn.commit()
 
+
+CJM_FILL_TRANSITIONS_SQL = """
+INSERT INTO app_metrica_cjm.transitions (counter_id, from_page, to_page, transitions_count, unique_visits)
+WITH ordered AS (
+  SELECT
+    counter_id,
+    visit_id,
+    page,
+    date_time,
+    LAG(page) OVER (PARTITION BY counter_id, visit_id ORDER BY date_time) AS prev_page
+  FROM app_metrica_cjm.hits_normalized
+)
+SELECT
+  counter_id,
+  prev_page,
+  page,
+  COUNT(*)::integer,
+  COUNT(DISTINCT visit_id)::integer
+FROM ordered
+WHERE prev_page IS NOT NULL
+  AND prev_page != page
+GROUP BY counter_id, prev_page, page
+"""
+
+CJM_FILL_PAGE_METRICS_SQL = """
+INSERT INTO app_metrica_cjm.page_metrics (
+  counter_id, page, total_hits, unique_visits, entries, exits, exit_rate
+)
+WITH entries AS (
+  SELECT counter_id, page, COUNT(*) AS entry_count
+  FROM (
+    SELECT DISTINCT ON (counter_id, visit_id) counter_id, visit_id, page
+    FROM app_metrica_cjm.hits_normalized
+    ORDER BY counter_id, visit_id, date_time ASC
+  ) t
+  GROUP BY counter_id, page
+),
+exits AS (
+  SELECT counter_id, page, COUNT(*) AS exit_count
+  FROM (
+    SELECT DISTINCT ON (counter_id, visit_id) counter_id, visit_id, page
+    FROM app_metrica_cjm.hits_normalized
+    ORDER BY counter_id, visit_id, date_time DESC
+  ) t
+  GROUP BY counter_id, page
+),
+totals AS (
+  SELECT
+    counter_id,
+    page,
+    COUNT(*) AS total_hits,
+    COUNT(DISTINCT visit_id) AS unique_visits
+  FROM app_metrica_cjm.hits_normalized
+  GROUP BY counter_id, page
+)
+SELECT
+  t.counter_id,
+  t.page,
+  t.total_hits,
+  t.unique_visits,
+  COALESCE(e.entry_count, 0),
+  COALESCE(x.exit_count, 0),
+  ROUND(COALESCE(x.exit_count, 0)::numeric / NULLIF(t.unique_visits, 0) * 100, 1)
+FROM totals t
+LEFT JOIN entries e ON t.counter_id = e.counter_id AND t.page = e.page
+LEFT JOIN exits x ON t.counter_id = x.counter_id AND t.page = x.page
+"""
 
 CJM_NODES_SQL = """
 WITH filtered AS (
@@ -1163,33 +1230,28 @@ SELECT
 FROM totals t
 LEFT JOIN entries e ON t.page = e.page
 LEFT JOIN exits x ON t.page = x.page
+WHERE t.page IN (
+  SELECT page FROM app_metrica_cjm.page_metrics
+  WHERE counter_id = %s
+    AND unique_visits >= %s
+)
 ORDER BY t.unique_visits DESC
 """
 
 CJM_EDGES_SQL = """
-WITH filtered AS (
-  SELECT visit_id, page, date_time
-  FROM app_metrica_cjm.hits_normalized
-  WHERE {filter}
-),
-ordered AS (
-  SELECT
-    visit_id,
-    page,
-    LAG(page) OVER (PARTITION BY visit_id ORDER BY date_time) AS prev_page
-  FROM filtered
-)
 SELECT
-  prev_page AS "from",
-  page AS "to",
-  COUNT(*) AS count,
-  COUNT(DISTINCT visit_id) AS unique_visits
-FROM ordered
-WHERE prev_page IS NOT NULL
-  AND prev_page != page
-GROUP BY prev_page, page
-HAVING COUNT(*) >= %s OR prev_page = '/' OR page = '/'
-ORDER BY COUNT(*) DESC
+  t.from_page AS "from",
+  t.to_page AS "to",
+  t.transitions_count AS count,
+  t.unique_visits
+FROM app_metrica_cjm.transitions t
+WHERE t.counter_id = %(counter_id)s
+  AND (
+    t.transitions_count >= %(min_transitions)s
+    OR t.from_page = '/'
+    OR t.to_page = '/'
+  )
+ORDER BY t.transitions_count DESC
 """
 
 CJM_CHANNELS_SQL = """
@@ -1219,6 +1281,9 @@ def get_cjm(
             detail="user_id_type: counter_user_id_hash или user_id",
         )
 
+    if counter_id is None:
+        raise HTTPException(status_code=400, detail="Укажите counter_id")
+
     filter_sql, filter_params, warning = build_cjm_filter(
         device, utm_medium, counter_id, user_id_type, user_id_value
     )
@@ -1231,7 +1296,11 @@ def get_cjm(
                     detail="Таблицы CJM не созданы. Нажмите «Пересчитать CJM».",
                 )
 
-            cur.execute(CJM_NODES_SQL.format(filter=filter_sql), filter_params)
+            min_visits = max(1, min_transitions // 3)
+            cur.execute(
+                CJM_NODES_SQL.format(filter=filter_sql),
+                [*filter_params, counter_id, min_visits],
+            )
             all_nodes = []
             for row in cur.fetchall():
                 all_nodes.append(
@@ -1244,10 +1313,10 @@ def get_cjm(
                     }
                 )
 
-            cur.execute(
-                CJM_EDGES_SQL.format(filter=filter_sql),
-                [*filter_params, min_transitions],
-            )
+            cur.execute(CJM_EDGES_SQL, {
+                "counter_id": counter_id,
+                "min_transitions": min_transitions,
+            })
             edges = [
                 {
                     "from": row["from"],

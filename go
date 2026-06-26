@@ -1,6 +1,20 @@
 #!/bin/bash
 cd "$(dirname "$0")"
 
+# Режим: ./go [save "сообщение"] или просто ./go
+if [ "$1" = "save" ]; then
+  MSG=${2:-"checkpoint: $(date '+%Y-%m-%d %H:%M')"}
+  git add -A
+  git commit -m "$MSG"
+  echo "✓ Сохранено: $MSG"
+  exit 0
+fi
+
+if [ "$1" = "migrate" ]; then
+  ./sql/migrate.sh
+  exit 0
+fi
+
 PORT=8000
 
 stop_server() {
