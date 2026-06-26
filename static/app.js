@@ -343,17 +343,10 @@ function showMissingDatesPopover(anchor, dates) {
   pop.className = "missing-popover";
   pop.addEventListener("click", (e) => e.stopPropagation());
 
-  const title = document.createElement("div");
-  title.className = "missing-popover-title";
-  title.textContent = "Пропущенные даты";
-  pop.appendChild(title);
-
-  dates.forEach((d) => {
-    const row = document.createElement("div");
-    row.className = "missing-date";
-    row.textContent = new Date(d).toLocaleDateString("ru-RU");
-    pop.appendChild(row);
-  });
+  pop.innerHTML = `
+    <div class="missing-popover-title">Пропущено дней: ${dates.length}</div>
+    ${dates.map((d) => `<div class="missing-date">${new Date(d).toLocaleDateString("ru-RU")}</div>`).join("")}
+  `;
 
   const btn = document.createElement("button");
   btn.className = "btn-accent btn-sm";
@@ -387,7 +380,14 @@ function showMissingDatesPopover(anchor, dates) {
   pop.appendChild(btn);
 
   const rect = anchor.getBoundingClientRect();
-  pop.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${rect.left}px;z-index:1000`;
+  pop.style.cssText = `
+    position:fixed;
+    top:${Math.min(rect.bottom + 4, window.innerHeight - 300)}px;
+    left:${rect.left}px;
+    z-index:1000;
+    max-height:280px;
+    overflow-y:auto;
+  `;
   document.body.appendChild(pop);
 
   setTimeout(() => {
@@ -573,14 +573,43 @@ function formatColumnHeader(column) {
 }
 
 function isClientIdColumn(col) {
-  const lc = col.toLowerCase();
-  return lc.includes("counteruserid") || lc.includes("client_id");
+  const lower = col.toLowerCase();
+  return (
+    lower.includes("counteruserid") ||
+    lower.includes("client_id") ||
+    lower.includes("clientid") ||
+    lower.includes("user_id_hash")
+  );
+}
+
+const ALWAYS_SHOW_COLS = [
+  "visit_id",
+  "counter_id",
+  "date",
+  "date_time",
+  "counter_user_id_hash",
+  "client_id",
+  "clientid",
+  "watch_id",
+  "watch_ids",
+  "user_id",
+  "start_url",
+  "end_url",
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+];
+
+function normalizedColName(col) {
+  return col.replace(/^ym:[a-z]+:/i, "").toLowerCase();
 }
 
 function filterJunkColumns(columns, rows) {
   const junkValues = new Set(['["0"]', '[""]', '["-1"]', "", "[]", "null", "[0]"]);
   const usefulColIndices = columns
     .map((col, i) => {
+      const colLower = normalizedColName(col);
+      if (ALWAYS_SHOW_COLS.some((w) => colLower.includes(w))) return i;
       const hasRealData = rows.some((row) => {
         const v = formatDbCell(row[i]).trim();
         return v !== "" && !junkValues.has(v);
@@ -975,18 +1004,33 @@ counterSelect.addEventListener("change", () => {
 previewVisitsBtn?.addEventListener("click", () => openDbPreview("visits"));
 previewHitsBtn?.addEventListener("click", () => openDbPreview("hits"));
 refreshCjmBtn?.addEventListener("click", async () => {
+  const counterId = document.getElementById("counterId")?.value || "";
   const btn = refreshCjmBtn;
   btn.disabled = true;
-  btn.textContent = "Пересчёт...";
+  btn.innerHTML = '<i data-lucide="loader" style="width:14px;height:14px"></i> Пересчёт...';
+  lucide.createIcons();
   try {
-    await fetch("/api/cjm/refresh", { method: "POST", ...FETCH_OPTS });
+    const url = counterId
+      ? `/api/cjm/refresh?counter_id=${encodeURIComponent(counterId)}`
+      : "/api/cjm/refresh";
+    const res = await fetch(url, { method: "POST", ...FETCH_OPTS });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || "Ошибка пересчёта");
+    }
     btn.textContent = "✓ CJM пересчитан";
     btn.style.color = "var(--success)";
   } catch {
-    btn.textContent = "Ошибка";
+    btn.textContent = "Ошибка пересчёта";
     btn.disabled = false;
   }
 });
+
+document.getElementById("goToCjmBtn")?.addEventListener("click", () => {
+  const counterId = document.getElementById("counterId")?.value || "";
+  window.location.href = counterId ? `/cjm?counter_id=${encodeURIComponent(counterId)}` : "/cjm";
+});
+
 statsRefreshBtn.addEventListener("click", loadStats);
 
 if (sidebarAuth) {

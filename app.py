@@ -1128,12 +1128,34 @@ def cjm_tables_exist(cur: psycopg.Cursor) -> bool:
     return bool(row and row["ready"])
 
 
-def refresh_cjm_tables() -> None:
+def refresh_cjm_tables(counter_id: int | None = None) -> None:
+    counter_where = ""
+    params: list[Any] = []
+    if counter_id is not None:
+        counter_where = "WHERE counter_id = %s"
+        params = [counter_id]
+
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("TRUNCATE app_metrica_cjm.transitions, app_metrica_cjm.page_metrics")
-            cur.execute(CJM_FILL_TRANSITIONS_SQL)
-            cur.execute(CJM_FILL_PAGE_METRICS_SQL)
+            if counter_id is not None:
+                cur.execute(
+                    "DELETE FROM app_metrica_cjm.transitions WHERE counter_id = %s",
+                    [counter_id],
+                )
+                cur.execute(
+                    "DELETE FROM app_metrica_cjm.page_metrics WHERE counter_id = %s",
+                    [counter_id],
+                )
+            else:
+                cur.execute("TRUNCATE app_metrica_cjm.transitions, app_metrica_cjm.page_metrics")
+            cur.execute(
+                CJM_FILL_TRANSITIONS_SQL.format(counter_where=counter_where),
+                params,
+            )
+            cur.execute(
+                CJM_FILL_PAGE_METRICS_SQL.format(counter_where=counter_where),
+                params,
+            )
         conn.commit()
 
 
@@ -1147,6 +1169,7 @@ WITH ordered AS (
     date_time,
     LAG(page) OVER (PARTITION BY counter_id, visit_id ORDER BY date_time) AS prev_page
   FROM app_metrica_cjm.hits_normalized
+  {counter_where}
 )
 SELECT
   counter_id,
@@ -1169,6 +1192,7 @@ WITH entries AS (
   FROM (
     SELECT DISTINCT ON (counter_id, visit_id) counter_id, visit_id, page
     FROM app_metrica_cjm.hits_normalized
+    {counter_where}
     ORDER BY counter_id, visit_id, date_time ASC
   ) t
   GROUP BY counter_id, page
@@ -1178,6 +1202,7 @@ exits AS (
   FROM (
     SELECT DISTINCT ON (counter_id, visit_id) counter_id, visit_id, page
     FROM app_metrica_cjm.hits_normalized
+    {counter_where}
     ORDER BY counter_id, visit_id, date_time DESC
   ) t
   GROUP BY counter_id, page
@@ -1189,6 +1214,7 @@ totals AS (
     COUNT(*) AS total_hits,
     COUNT(DISTINCT visit_id) AS unique_visits
   FROM app_metrica_cjm.hits_normalized
+  {counter_where}
   GROUP BY counter_id, page
 )
 SELECT
@@ -1375,13 +1401,18 @@ def get_cjm_channels(
 
 
 @app.post("/api/cjm/refresh")
-def refresh_cjm():
+def refresh_cjm(counter_id: int | None = Query(None)):
     try:
-        refresh_cjm_tables()
+        refresh_cjm_tables(counter_id)
     except Exception as exc:
         logger.exception("CJM refresh failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return {"status": "ok", "message": "Таблицы CJM пересчитаны"}
+    msg = (
+        f"CJM пересчитан для счётчика {counter_id}"
+        if counter_id is not None
+        else "Таблицы CJM пересчитаны"
+    )
+    return {"status": "ok", "message": msg}
 
 
 @app.get("/cjm")

@@ -14,7 +14,7 @@ const counterSelect = document.getElementById("counter");
 const deviceSelect = document.getElementById("device");
 const utmMediumSelect = document.getElementById("utm-medium");
 const minTransitionsInput = document.getElementById("minTransitions");
-const minTransitionsValue = document.getElementById("minTransitionsValue");
+const minTransitionsNum = document.getElementById("minTransitionsNum");
 const applyBtn = document.getElementById("apply-btn");
 const refreshBtn = document.getElementById("refresh-btn");
 const findUserBtn = document.getElementById("find-user-btn");
@@ -481,6 +481,7 @@ async function loadCounters() {
   });
   restoreCounterSelection();
   updateTopbarCounter();
+  counterSelect.dispatchEvent(new CustomEvent("countersLoaded"));
 }
 
 async function loadChannels() {
@@ -616,9 +617,27 @@ async function initPage() {
 
     showAuthorized(data.token_hint);
     await loadCounters();
-    await loadChannels();
 
     const urlParams = new URLSearchParams(window.location.search);
+    const prefilledCounterId = urlParams.get("counter_id");
+    if (prefilledCounterId) {
+      const setCounter = () => {
+        const option = [...counterSelect.options].find((o) => o.value === prefilledCounterId);
+        if (option) {
+          counterSelect.value = prefilledCounterId;
+          saveCounterId(Number(prefilledCounterId));
+          updateTopbarCounter();
+        }
+      };
+      if (counterSelect.options.length > 1) {
+        setCounter();
+      } else {
+        counterSelect.addEventListener("countersLoaded", setCounter, { once: true });
+      }
+    }
+
+    await loadChannels();
+
     const prefilledHash = urlParams.get("user_hash");
     if (prefilledHash) {
       userSearchBar.classList.remove("hidden");
@@ -653,8 +672,20 @@ userSearchClear.addEventListener("click", clearUserSearch);
 userIdTypeSelect.addEventListener("change", updateUserIdPlaceholder);
 
 minTransitionsInput.addEventListener("input", () => {
-  minTransitionsValue.textContent = minTransitionsInput.value;
+  if (minTransitionsNum) minTransitionsNum.value = minTransitionsInput.value;
 });
+
+minTransitionsNum?.addEventListener("change", () => {
+  const val = Math.max(1, parseInt(minTransitionsNum.value, 10) || 1);
+  minTransitionsNum.value = val;
+  minTransitionsInput.value = Math.min(val, 2000);
+  minTransitionsInput.dispatchEvent(new Event("change"));
+});
+
+minTransitionsNum?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") minTransitionsNum.dispatchEvent(new Event("change"));
+});
+
 minTransitionsInput.addEventListener("change", loadCjm);
 
 document.querySelectorAll(".layout-btn").forEach((btn) => {
