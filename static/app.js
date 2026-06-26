@@ -10,7 +10,7 @@ const authModal = document.getElementById("auth-modal");
 const authModalBackdrop = document.getElementById("auth-modal-backdrop");
 const authModalClose = document.getElementById("auth-modal-close");
 const sidebarAuth = document.getElementById("sidebar-auth");
-const counterSelect = document.getElementById("counter");
+const counterSelect = document.getElementById("counterId");
 const dateRangeDisplay = document.getElementById("dateRangeDisplay");
 const dateRangeText = document.getElementById("dateRangeText");
 const exportBtn = document.getElementById("export-btn");
@@ -45,20 +45,14 @@ const progressHitsText = document.getElementById("progress-hits-text");
 const logWindow = document.getElementById("log-window");
 const statusMessage = document.getElementById("status-message");
 const statusMeta = document.getElementById("status-meta");
-const previewActions = document.getElementById("preview-actions");
-const showVisitsBtn = document.getElementById("show-visits-btn");
-const showHitsBtn = document.getElementById("show-hits-btn");
+const previewVisitsBtn = document.getElementById("previewVisitsBtn");
+const previewHitsBtn = document.getElementById("previewHitsBtn");
+const refreshCjmBtn = document.getElementById("refreshCjmBtn");
 const resultSection = document.getElementById("result-section");
 const resultVisits = document.getElementById("result-visits");
 const resultHits = document.getElementById("result-hits");
 
-const previewSection = document.getElementById("preview-section");
-const previewTotal = document.getElementById("preview-total");
-const previewTable = document.getElementById("preview-table");
-const toggleButtons = document.querySelectorAll(".toggle");
-
 let pollTimer = null;
-let currentPreviewTable = "visits";
 let authorized = false;
 let countersList = [];
 let statsByCounter = new Map();
@@ -70,8 +64,13 @@ let dbSortCol = null;
 let dbSortDir = "desc";
 let dateFrom = "";
 let dateTo = "";
-let fpInstance = null;
+let fpInstance;
 let emptyCountersVisible = false;
+
+function parseApiDate(str) {
+  const [y, m, d] = str.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
 
 function formatDate(date) {
   const y = date.getFullYear();
@@ -369,12 +368,16 @@ function showMissingDatesPopover(anchor, dates) {
 
     pop.remove();
 
-    const startDate = new Date(first);
-    const endDate = new Date(last);
+    const startDate = parseApiDate(first);
+    const endDate = parseApiDate(last);
     if (fpInstance) fpInstance.setDate([startDate, endDate]);
     dateFrom = first;
     dateTo = last;
-    updateDateRangeText(startDate, endDate);
+    const rangeTextEl = document.getElementById("dateRangeText");
+    if (rangeTextEl) {
+      rangeTextEl.textContent =
+        startDate.toLocaleDateString("ru-RU") + " — " + endDate.toLocaleDateString("ru-RU");
+    }
     periodButtons.forEach((b) => b.classList.remove("active"));
     updateExportButtonState();
     updateTopbarMeta();
@@ -574,6 +577,24 @@ function isClientIdColumn(col) {
   return lc.includes("counteruserid") || lc.includes("client_id");
 }
 
+function filterJunkColumns(columns, rows) {
+  const junkValues = new Set(['["0"]', '[""]', '["-1"]', "", "[]", "null", "[0]"]);
+  const usefulColIndices = columns
+    .map((col, i) => {
+      const hasRealData = rows.some((row) => {
+        const v = formatDbCell(row[i]).trim();
+        return v !== "" && !junkValues.has(v);
+      });
+      return hasRealData ? i : null;
+    })
+    .filter((i) => i !== null);
+
+  return {
+    columns: usefulColIndices.map((i) => columns[i]),
+    rows: rows.map((row) => usefulColIndices.map((i) => row[i])),
+  };
+}
+
 function reorderClientIdColumn(columns, rows) {
   const clientIdCol = columns.findIndex(isClientIdColumn);
   if (clientIdCol <= 1) return { columns, rows };
@@ -645,6 +666,7 @@ async function loadDbTable() {
     const total = data.total || 0;
     let columns = data.columns || [];
     let rows = data.rows || [];
+    ({ columns, rows } = filterJunkColumns(columns, rows));
     ({ columns, rows } = reorderClientIdColumn(columns, rows));
 
     const from = total ? dbCurrentPage * DB_PAGE_SIZE + 1 : 0;
@@ -717,6 +739,21 @@ async function loadDbTable() {
     if (dbPrevPage) dbPrevPage.disabled = true;
     if (dbNextPage) dbNextPage.disabled = true;
   }
+}
+
+function openDbPreview(table) {
+  dbTabButtons.forEach((b) => {
+    b.classList.toggle("active", b.dataset.table === table);
+  });
+  dbCurrentTable = table;
+  dbCurrentPage = 0;
+  const counterId = counterSelect?.value || "";
+  dbCurrentCounter = counterId;
+  populateDbCounterSelect();
+  if (dbCounterSelect) dbCounterSelect.value = counterId;
+  if (dbPopup) dbPopup.style.display = "flex";
+  loadDbTable();
+  lucide.createIcons({ nodes: dbPopup?.querySelectorAll("[data-lucide]") || [] });
 }
 
 async function loadStats() {
@@ -855,7 +892,6 @@ async function pollStatus(jobId) {
 
     if (data.status === "done") {
       stopPolling();
-      previewActions.classList.remove("hidden");
       statusMessage.textContent = data.message;
       resultSection.classList.remove("hidden");
       resultVisits.textContent = (data.rows_visits || 0).toLocaleString("ru-RU");
@@ -886,8 +922,6 @@ async function startExport() {
   exportBtn.disabled = true;
   statusSection.classList.remove("hidden");
   resultSection.classList.add("hidden");
-  previewSection.classList.add("hidden");
-  previewActions.classList.add("hidden");
   statusMessage.style.color = "";
   setProgress(0);
   logWindow.innerHTML = "";
@@ -923,66 +957,6 @@ async function startExport() {
   }
 }
 
-function formatCell(value) {
-  if (value === null || value === undefined) {
-    return "";
-  }
-  if (Array.isArray(value)) {
-    return JSON.stringify(value);
-  }
-  return String(value);
-}
-
-async function loadPreview(table) {
-  currentPreviewTable = table;
-  toggleButtons.forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.table === table);
-  });
-
-  const params = new URLSearchParams({
-    counter_id: counterSelect.value,
-    table,
-    date_from: dateFrom,
-    date_to: dateTo,
-  });
-
-  previewSection.classList.remove("hidden");
-  previewTotal.textContent = "Загрузка…";
-
-  const response = await fetch(`/api/preview?${params}`, FETCH_OPTS);
-  const data = await response.json();
-  if (!response.ok) {
-    previewTotal.textContent = data.detail || "Ошибка загрузки превью";
-    return;
-  }
-
-  previewTotal.textContent = `Всего строк в БД за период: ${data.total}`;
-
-  const thead = previewTable.querySelector("thead");
-  const tbody = previewTable.querySelector("tbody");
-  thead.innerHTML = "";
-  tbody.innerHTML = "";
-
-  const headerRow = document.createElement("tr");
-  data.columns.forEach((column) => {
-    const th = document.createElement("th");
-    th.textContent = column;
-    headerRow.appendChild(th);
-  });
-  thead.appendChild(headerRow);
-
-  data.rows.forEach((row) => {
-    const tr = document.createElement("tr");
-    data.columns.forEach((column) => {
-      const td = document.createElement("td");
-      td.textContent = formatCell(row[column]);
-      td.title = td.textContent;
-      tr.appendChild(td);
-    });
-    tbody.appendChild(tr);
-  });
-}
-
 clientIdInput.addEventListener("input", () => {
   clientIdInput.style.borderColor = "";
 });
@@ -998,8 +972,21 @@ counterSelect.addEventListener("change", () => {
   updateExportButtonState();
   updateTopbarMeta();
 });
-showVisitsBtn.addEventListener("click", () => loadPreview("visits"));
-showHitsBtn.addEventListener("click", () => loadPreview("hits"));
+previewVisitsBtn?.addEventListener("click", () => openDbPreview("visits"));
+previewHitsBtn?.addEventListener("click", () => openDbPreview("hits"));
+refreshCjmBtn?.addEventListener("click", async () => {
+  const btn = refreshCjmBtn;
+  btn.disabled = true;
+  btn.textContent = "Пересчёт...";
+  try {
+    await fetch("/api/cjm/refresh", { method: "POST", ...FETCH_OPTS });
+    btn.textContent = "✓ CJM пересчитан";
+    btn.style.color = "var(--success)";
+  } catch {
+    btn.textContent = "Ошибка";
+    btn.disabled = false;
+  }
+});
 statsRefreshBtn.addEventListener("click", loadStats);
 
 if (sidebarAuth) {
@@ -1077,10 +1064,6 @@ if (dbNextPage) {
 
 periodButtons.forEach((btn) => {
   btn.addEventListener("click", () => applyPeriod(btn.dataset.period));
-});
-
-toggleButtons.forEach((btn) => {
-  btn.addEventListener("click", () => loadPreview(btn.dataset.table));
 });
 
 initFlatpickr();

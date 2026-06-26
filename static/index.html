@@ -88,7 +88,7 @@
 
     <main class="main-content">
       <!-- Состояние данных -->
-      <section class="card" id="stats-section">
+      <section class="card section-card" id="stats-section">
         <div class="stats-header">
           <div>
             <h2 class="card-title" style="margin:0">Состояние данных в БД</h2>
@@ -122,15 +122,13 @@
       </section>
 
       <!-- Параметры выгрузки -->
-      <section class="card" id="exportForm">
+      <section class="card section-card" id="exportForm">
         <h2 class="card-title">Параметры выгрузки</h2>
-        <div class="form-row">
-          <label class="field field--counter">
-            <span class="field-label">Счётчик</span>
-            <select id="counter" disabled>
-              <option value="">— выберите счётчик —</option>
-            </select>
-          </label>
+        <div class="counter-select-wrap">
+          <label class="filter-label" for="counterId">Счётчик</label>
+          <select id="counterId" class="select-field" disabled>
+            <option value="">— выберите счётчик —</option>
+          </select>
         </div>
 
         <div class="date-range-wrap">
@@ -156,7 +154,7 @@
       </section>
 
       <!-- Прогресс -->
-      <section class="card hidden" id="status-section">
+      <section class="card section-card hidden" id="status-section">
         <h2 class="card-title">Прогресс выгрузки</h2>
 
         <div class="progress-group">
@@ -187,7 +185,7 @@
       </section>
 
       <!-- Результат -->
-      <section class="card hidden" id="result-section">
+      <section class="card section-card hidden" id="result-section">
         <h2 class="card-title">Результат</h2>
         <div class="stat-grid">
           <div class="stat-block">
@@ -201,29 +199,12 @@
         </div>
         <div class="result-actions">
           <a href="/cjm" class="btn btn-primary">Перейти к CJM-графу</a>
-          <button type="button" id="show-visits-btn" class="btn btn-secondary">Превью визитов</button>
-          <button type="button" id="show-hits-btn" class="btn btn-secondary">Превью хитов</button>
-        </div>
-        <div class="preview-actions hidden" id="preview-actions"></div>
-      </section>
-
-      <!-- Превью -->
-      <section class="card hidden" id="preview-section">
-        <div class="preview-header">
-          <h2 class="card-title" style="margin:0">Превью данных</h2>
-          <div class="preview-controls">
-            <span id="preview-total"></span>
-            <div class="toggle-group">
-              <button type="button" class="toggle btn active" data-table="visits">Визиты</button>
-              <button type="button" class="toggle btn" data-table="hits">Хиты</button>
-            </div>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table id="preview-table">
-            <thead></thead>
-            <tbody></tbody>
-          </table>
+          <button type="button" id="refreshCjmBtn" class="btn btn-secondary">
+            <i data-lucide="refresh-cw" style="width:14px;height:14px"></i>
+            Пересчитать CJM
+          </button>
+          <button type="button" id="previewVisitsBtn" class="btn btn-secondary">Превью визитов</button>
+          <button type="button" id="previewHitsBtn" class="btn btn-secondary">Превью хитов</button>
         </div>
       </section>
 

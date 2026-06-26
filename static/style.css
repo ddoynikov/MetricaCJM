@@ -1,5 +1,19 @@
 /* Index page — Загрузка данных */
 
+.section-card + .section-card,
+.card + .card {
+  margin-top: var(--space-5);
+}
+
+.counter-select-wrap {
+  max-width: 480px;
+  margin-bottom: var(--space-4);
+}
+
+.counter-select-wrap .select-field {
+  width: 100%;
+}
+
 .stats-header {
   display: flex;
   align-items: flex-start;
