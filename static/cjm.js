@@ -40,11 +40,94 @@ let authorized = false;
 let highlightedNode = null;
 let activeUserFilter = null;
 
-const NODE_TYPE_COLORS = {
-  entry: { bg: "#2A3F6F", border: "#4F7CFF" },
-  content: { bg: "#1C2030", border: "#2E3550" },
-  funnel: { bg: "#3A2A1A", border: "#F5A623" },
-  conversion: { bg: "#1A3A2A", border: "#34C97E" },
+const cyStyles = [
+  {
+    selector: "node",
+    style: {
+      shape: "round-rectangle",
+      label: "data(label)",
+      "text-valign": "center",
+      "text-halign": "center",
+      "font-size": "13px",
+      "font-family": '"JetBrains Mono", monospace',
+      color: "#E8EAF0",
+      "background-color": "#1C2030",
+      "border-width": 1.5,
+      "border-color": "#2E3550",
+      padding: "6px 20px",
+      width: "label",
+      height: "32px",
+      "text-background-opacity": 0,
+    },
+  },
+  {
+    selector: 'node[type="entry"]',
+    style: {
+      "background-color": "#2A3F6F",
+      "border-color": "#4F7CFF",
+    },
+  },
+  {
+    selector: 'node[type="funnel"]',
+    style: {
+      "background-color": "#3A2A1A",
+      "border-color": "#F5A623",
+    },
+  },
+  {
+    selector: 'node[type="conversion"]',
+    style: {
+      "background-color": "#1A3A2A",
+      "border-color": "#34C97E",
+    },
+  },
+  {
+    selector: "node.highlighted",
+    style: {
+      "border-width": 3,
+      "border-color": "#4F7CFF",
+    },
+  },
+  {
+    selector: "node.faded",
+    style: {
+      opacity: 0.2,
+    },
+  },
+  {
+    selector: "edge",
+    style: {
+      width: 1,
+      "line-color": "#2E3550",
+      "target-arrow-color": "#2E3550",
+      "target-arrow-shape": "triangle",
+      "curve-style": "bezier",
+      opacity: 0.7,
+    },
+  },
+  {
+    selector: "edge.highlighted",
+    style: {
+      "line-color": "#4F7CFF",
+      "target-arrow-color": "#4F7CFF",
+      opacity: 1,
+    },
+  },
+  {
+    selector: "edge.faded",
+    style: {
+      opacity: 0.05,
+    },
+  },
+];
+
+const layoutConfig = {
+  name: "dagre",
+  rankDir: "TB",
+  nodeSep: 60,
+  rankSep: 100,
+  fit: true,
+  padding: 40,
 };
 
 const USER_ID_PLACEHOLDERS = {
@@ -144,7 +227,7 @@ function renderTransitionsList(container, items, direction) {
 
 function resetHighlight() {
   if (!cy) return;
-  cy.elements().style("opacity", 1);
+  cy.elements().removeClass("faded highlighted");
   highlightedNode = null;
 }
 
@@ -186,10 +269,10 @@ function bindGraphInteractions() {
     }
 
     highlightedNode = node;
-    cy.elements().style("opacity", 0.2);
-    node.style("opacity", 1);
-    node.connectedEdges().style("opacity", 1);
-    node.connectedEdges().connectedNodes().style("opacity", 1);
+    cy.elements().addClass("faded");
+    node.removeClass("faded").addClass("highlighted");
+    node.connectedEdges().removeClass("faded").addClass("highlighted");
+    node.neighborhood().nodes().removeClass("faded");
     showSidebar(node.data());
   });
 
@@ -201,50 +284,10 @@ function bindGraphInteractions() {
   });
 }
 
-function applyNodeBorderWidths(maxVisits) {
-  if (!cy) return;
-  cy.nodes().forEach((node) => {
-    const visits = node.data("visit_count") || 0;
-    const borderWidth = 1 + (visits / maxVisits) * 3;
-    node.style("border-width", borderWidth);
-  });
-}
-
-function applyEdgeWidths(maxCount) {
-  if (!cy) return;
-  const minWidth = 1;
-  const maxWidth = 8;
-  cy.edges().forEach((edge) => {
-    const count = edge.data("count") || 0;
-    const width = minWidth + (count / maxCount) * (maxWidth - minWidth);
-    edge.style("width", width);
-  });
-}
-
-function applyNodeColors() {
-  if (!cy) return;
-  cy.nodes().forEach((node) => {
-    const label = node.data("label") || node.data("id") || "";
-    const type = getNodeType(label);
-    const colors = NODE_TYPE_COLORS[type];
-    node.style("background-color", colors.bg);
-    node.style("border-color", colors.border);
-  });
-}
-
-const layoutConfig = {
-  name: "dagre",
-  rankDir: "TB",
-  nodeSep: 80,
-  rankSep: 120,
-  fit: true,
-  padding: 40,
-};
-
 function runLayoutAndFit() {
   if (!cy) return;
   const layout = cy.layout(layoutConfig);
-  layout.on("layoutstop", function () {
+  layout.on("layoutstop", () => {
     cy.fit(undefined, 40);
   });
   layout.run();
@@ -262,17 +305,17 @@ function renderGraph(data, warning) {
   tooltip.hidden = true;
   updateSliderMax(data.edges);
 
-  const maxVisits = Math.max(...data.nodes.map((n) => n.visits), 1);
-  const maxCount = Math.max(...data.edges.map((e) => e.count), 1);
   const nodeIds = new Set(data.nodes.map((n) => n.id));
 
   const elements = [];
 
   data.nodes.forEach((node) => {
+    const label = node.id;
     elements.push({
       data: {
         id: node.id,
-        label: node.id,
+        label,
+        type: getNodeType(label),
         visits: node.visits,
         visit_count: node.visits,
         entries: node.entries,
@@ -326,47 +369,23 @@ function renderGraph(data, warning) {
     userPanningEnabled: true,
     minZoom: 0.3,
     maxZoom: 3,
-    style: [
-      {
-        selector: "node",
-        style: {
-          shape: "round-rectangle",
-          width: "label",
-          height: 32,
-          padding: "6px 20px",
-          label: "data(label)",
-          "text-valign": "center",
-          "text-halign": "center",
-          "font-size": "13px",
-          "font-family": "JetBrains Mono, monospace",
-          color: "#E8EAF0",
-          "text-background-opacity": 0,
-          "border-width": 1.5,
-        },
-      },
-      {
-        selector: "edge",
-        style: {
-          "line-color": "#555C78",
-          "target-arrow-color": "#555C78",
-          "target-arrow-shape": "triangle",
-          "curve-style": "bezier",
-          opacity: 0.85,
-        },
-      },
-      {
-        selector: "node:selected",
-        style: {
-          "border-width": 3,
-        },
-      },
-    ],
+    style: cyStyles,
     wheelSensitivity: 0.2,
   });
 
-  applyNodeColors();
-  applyNodeBorderWidths(maxVisits);
-  applyEdgeWidths(maxCount);
+  const maxVisits = Math.max(...cy.nodes().map((n) => n.data("visit_count") || 1));
+  const maxCount = Math.max(...cy.edges().map((e) => e.data("count") || 1));
+
+  cy.nodes().forEach((node) => {
+    const ratio = (node.data("visit_count") || 1) / maxVisits;
+    node.style("border-width", 1 + ratio * 3);
+  });
+
+  cy.edges().forEach((edge) => {
+    const ratio = (edge.data("count") || 1) / maxCount;
+    edge.style("width", 1 + ratio * 5);
+  });
+
   bindGraphControls();
   bindGraphInteractions();
   runLayoutAndFit();
