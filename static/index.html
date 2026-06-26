@@ -111,8 +111,10 @@
               </tr>
             </thead>
             <tbody id="stats-tbody"></tbody>
+            <tbody id="emptyCounters" style="display:none"></tbody>
           </table>
         </div>
+        <div id="emptyCountersToggle" class="empty-counters-toggle" hidden></div>
         <button type="button" id="toggleDataTable" class="btn btn-secondary stats-toggle-data">
           <i data-lucide="table" style="width:14px;height:14px"></i>
           Посмотреть данные в БД
@@ -129,22 +131,21 @@
               <option value="">— выберите счётчик —</option>
             </select>
           </label>
-          <label class="field">
-            <span class="field-label">Дата начала</span>
-            <input type="text" id="dateFrom" placeholder="дд.мм.гггг" disabled readonly>
-          </label>
-          <label class="field">
-            <span class="field-label">Дата конца</span>
-            <input type="text" id="dateTo" placeholder="дд.мм.гггг" disabled readonly>
-          </label>
         </div>
 
-        <div class="period-row">
-          <span class="period-label">Период:</span>
-          <button type="button" class="period-btn" data-period="yesterday">Вчера</button>
-          <button type="button" class="period-btn" data-period="week">Неделя</button>
-          <button type="button" class="period-btn" data-period="month">Месяц</button>
-          <button type="button" class="period-btn" data-period="quarter">Квартал</button>
+        <div class="date-range-wrap">
+          <label class="filter-label">Период</label>
+          <div class="date-range-row">
+            <button type="button" class="period-btn" data-period="yesterday">Вчера</button>
+            <button type="button" class="period-btn" data-period="week">Неделя</button>
+            <button type="button" class="period-btn" data-period="month">Месяц</button>
+            <button type="button" class="period-btn" data-period="quarter">Квартал</button>
+            <button type="button" class="period-btn" data-period="year">Год</button>
+            <div class="date-range-input" id="dateRangeDisplay">
+              <i data-lucide="calendar" style="width:14px;height:14px;color:var(--text-muted)"></i>
+              <span id="dateRangeText"></span>
+            </div>
+          </div>
         </div>
 
         <p class="error" id="settings-error" hidden></p>
@@ -226,46 +227,6 @@
         </div>
       </section>
 
-      <!-- 4. Данные в базе -->
-      <section class="card" id="dataTableSection" style="display:none">
-        <div class="db-preview-header">
-          <div>
-            <h2 class="card-title" style="margin:0">Данные в базе</h2>
-            <p class="db-preview-sub">Просмотр строк в PostgreSQL</p>
-          </div>
-          <div class="db-preview-controls">
-            <div class="toggle-group">
-              <button type="button" class="toggle btn db-preview-tab active" data-table="visits">Визиты</button>
-              <button type="button" class="toggle btn db-preview-tab" data-table="hits">Хиты</button>
-            </div>
-            <label class="field field--counter">
-              <span class="field-label">Счётчик</span>
-              <select id="db-preview-counter">
-                <option value="">Все счётчики</option>
-              </select>
-            </label>
-          </div>
-        </div>
-        <div class="db-preview-body" id="db-preview-body">
-          <div class="db-preview-loading hidden" id="db-preview-loading">
-            <i data-lucide="loader-circle" class="db-preview-spinner"></i>
-            <span>Загрузка…</span>
-          </div>
-          <div class="data-table-wrap db-preview-table-wrap">
-            <table class="data-table" id="db-preview-table">
-              <thead id="db-preview-thead"></thead>
-              <tbody id="db-preview-tbody"></tbody>
-            </table>
-          </div>
-          <div class="db-preview-pagination" id="db-preview-pagination">
-            <span class="db-preview-range" id="db-preview-range">—</span>
-            <div class="db-preview-nav">
-              <button type="button" id="db-preview-prev" class="btn btn-ghost" disabled>Пред</button>
-              <button type="button" id="db-preview-next" class="btn btn-ghost" disabled>След</button>
-            </div>
-          </div>
-        </div>
-      </section>
     </main>
   </div>
 
@@ -297,6 +258,42 @@
           </div>
         </li>
       </ol>
+    </div>
+  </div>
+
+  <div id="dbPopup" class="popup-overlay" style="display:none">
+    <div class="popup-modal popup-modal--wide">
+      <div class="popup-header">
+        <div>
+          <div class="popup-title">Данные в базе</div>
+          <div class="popup-subtitle">Структура таблиц PostgreSQL</div>
+        </div>
+        <button type="button" id="dbPopupClose" class="popup-close">
+          <i data-lucide="x" style="width:16px;height:16px"></i>
+        </button>
+      </div>
+
+      <div class="popup-controls">
+        <div class="tab-row">
+          <button type="button" class="tab-btn active" data-table="visits">Визиты</button>
+          <button type="button" class="tab-btn" data-table="hits">Хиты</button>
+        </div>
+        <select id="dbCounterSelect" class="select-sm">
+          <option value="">Все счётчики</option>
+        </select>
+      </div>
+
+      <div class="popup-stats" id="dbPopupStats"></div>
+
+      <div class="popup-table-wrap" id="dbTableWrap">
+        <div class="loading-state">Загрузка...</div>
+      </div>
+
+      <div class="popup-pagination">
+        <button type="button" id="dbPrevPage" class="btn-secondary btn-sm">← Пред</button>
+        <span id="dbPageInfo" class="page-info"></span>
+        <button type="button" id="dbNextPage" class="btn-secondary btn-sm">След →</button>
+      </div>
     </div>
   </div>
 

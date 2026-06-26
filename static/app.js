@@ -11,8 +11,8 @@ const authModalBackdrop = document.getElementById("auth-modal-backdrop");
 const authModalClose = document.getElementById("auth-modal-close");
 const sidebarAuth = document.getElementById("sidebar-auth");
 const counterSelect = document.getElementById("counter");
-const dateFromInput = document.getElementById("dateFrom");
-const dateToInput = document.getElementById("dateTo");
+const dateRangeDisplay = document.getElementById("dateRangeDisplay");
+const dateRangeText = document.getElementById("dateRangeText");
 const exportBtn = document.getElementById("export-btn");
 const settingsError = document.getElementById("settings-error");
 const topbarMeta = document.getElementById("topbar-meta");
@@ -22,18 +22,19 @@ const periodButtons = document.querySelectorAll(".period-btn");
 const statsRefreshBtn = document.getElementById("stats-refresh-btn");
 const statsUpdatedEl = document.getElementById("stats-updated");
 const statsTbody = document.getElementById("stats-tbody");
+const emptyCountersTbody = document.getElementById("emptyCounters");
+const emptyCountersToggle = document.getElementById("emptyCountersToggle");
 const toggleDataTableBtn = document.getElementById("toggleDataTable");
-const dataSection = document.getElementById("dataTableSection");
 
-const dbPreviewCounter = document.getElementById("db-preview-counter");
-const dbPreviewBody = document.getElementById("db-preview-body");
-const dbPreviewLoading = document.getElementById("db-preview-loading");
-const dbPreviewThead = document.getElementById("db-preview-thead");
-const dbPreviewTbody = document.getElementById("db-preview-tbody");
-const dbPreviewRange = document.getElementById("db-preview-range");
-const dbPreviewPrev = document.getElementById("db-preview-prev");
-const dbPreviewNext = document.getElementById("db-preview-next");
-const dbPreviewTabs = document.querySelectorAll(".db-preview-tab");
+const dbPopup = document.getElementById("dbPopup");
+const dbPopupClose = document.getElementById("dbPopupClose");
+const dbCounterSelect = document.getElementById("dbCounterSelect");
+const dbPopupStats = document.getElementById("dbPopupStats");
+const dbTableWrap = document.getElementById("dbTableWrap");
+const dbPrevPage = document.getElementById("dbPrevPage");
+const dbNextPage = document.getElementById("dbNextPage");
+const dbPageInfo = document.getElementById("dbPageInfo");
+const dbTabButtons = document.querySelectorAll("#dbPopup .tab-btn");
 
 const statusSection = document.getElementById("status-section");
 const progressBar = document.getElementById("progress-bar");
@@ -61,13 +62,14 @@ let currentPreviewTable = "visits";
 let authorized = false;
 let countersList = [];
 let statsByCounter = new Map();
-let dbPreviewTable = "visits";
-let dbPreviewOffset = 0;
-const DB_PREVIEW_LIMIT = 25;
+let dbCurrentTable = "visits";
+let dbCurrentPage = 0;
+let dbCurrentCounter = "";
+const DB_PAGE_SIZE = 25;
 let dateFrom = "";
 let dateTo = "";
-let fpFrom = null;
-let fpTo = null;
+let fpInstance = null;
+let emptyCountersVisible = false;
 
 function formatDate(date) {
   const y = date.getFullYear();
@@ -82,8 +84,10 @@ function yesterday() {
   return d;
 }
 
-function isDataSectionVisible() {
-  return dataSection && dataSection.style.display !== "none";
+function updateDateRangeText(start, end) {
+  if (!dateRangeText) return;
+  dateRangeText.textContent =
+    `${start.toLocaleDateString("ru-RU")} — ${end.toLocaleDateString("ru-RU")}`;
 }
 
 function initFlatpickr() {
@@ -92,28 +96,21 @@ function initFlatpickr() {
   start.setDate(end.getDate() - 7);
   dateFrom = formatDate(start);
   dateTo = formatDate(end);
+  updateDateRangeText(start, end);
 
-  fpFrom = flatpickr("#dateFrom", {
+  fpInstance = flatpickr("#dateRangeDisplay", {
     locale: "ru",
+    mode: "range",
     dateFormat: "d.m.Y",
-    defaultDate: start,
+    defaultDate: [start, end],
+    showMonths: 2,
+    inline: false,
+    disableMobile: true,
     onChange: (selectedDates) => {
-      if (selectedDates[0]) {
+      if (selectedDates.length === 2) {
         dateFrom = formatDate(selectedDates[0]);
-        periodButtons.forEach((btn) => btn.classList.remove("active"));
-        updateExportButtonState();
-        updateTopbarMeta();
-      }
-    },
-  });
-
-  fpTo = flatpickr("#dateTo", {
-    locale: "ru",
-    dateFormat: "d.m.Y",
-    defaultDate: end,
-    onChange: (selectedDates) => {
-      if (selectedDates[0]) {
-        dateTo = formatDate(selectedDates[0]);
+        dateTo = formatDate(selectedDates[1]);
+        updateDateRangeText(selectedDates[0], selectedDates[1]);
         periodButtons.forEach((btn) => btn.classList.remove("active"));
         updateExportButtonState();
         updateTopbarMeta();
@@ -122,22 +119,50 @@ function initFlatpickr() {
   });
 }
 
+const periods = {
+  yesterday: () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return [d, d];
+  },
+  week: () => {
+    const e = new Date();
+    e.setDate(e.getDate() - 1);
+    const s = new Date();
+    s.setDate(s.getDate() - 7);
+    return [s, e];
+  },
+  month: () => {
+    const e = new Date();
+    e.setDate(e.getDate() - 1);
+    const s = new Date();
+    s.setDate(s.getDate() - 30);
+    return [s, e];
+  },
+  quarter: () => {
+    const e = new Date();
+    e.setDate(e.getDate() - 1);
+    const s = new Date();
+    s.setDate(s.getDate() - 90);
+    return [s, e];
+  },
+  year: () => {
+    const e = new Date();
+    e.setDate(e.getDate() - 1);
+    const s = new Date();
+    s.setFullYear(s.getFullYear() - 1);
+    return [s, e];
+  },
+};
+
 function applyPeriod(period) {
-  const end = yesterday();
-  const start = new Date(end);
-  if (period === "yesterday") {
-    /* start = end */
-  } else if (period === "week") {
-    start.setDate(end.getDate() - 7);
-  } else if (period === "month") {
-    start.setDate(end.getDate() - 30);
-  } else if (period === "quarter") {
-    start.setDate(end.getDate() - 90);
-  }
-  dateFrom = formatDate(start);
-  dateTo = formatDate(end);
-  if (fpFrom) fpFrom.setDate(start);
-  if (fpTo) fpTo.setDate(end);
+  const fn = periods[period];
+  if (!fn) return;
+  const [s, e] = fn();
+  if (fpInstance) fpInstance.setDate([s, e]);
+  dateFrom = formatDate(s);
+  dateTo = formatDate(e);
+  updateDateRangeText(s, e);
   periodButtons.forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.period === period);
   });
@@ -208,10 +233,10 @@ function setProgress(pct) {
 
 function setFormEnabled(enabled) {
   counterSelect.disabled = !enabled;
-  if (fpFrom?.input) fpFrom.input.disabled = !enabled;
-  if (fpTo?.input) fpTo.input.disabled = !enabled;
-  if (fpFrom) fpFrom.set("clickOpens", enabled);
-  if (fpTo) fpTo.set("clickOpens", enabled);
+  if (dateRangeDisplay) {
+    dateRangeDisplay.classList.toggle("is-disabled", !enabled);
+  }
+  if (fpInstance) fpInstance.set("clickOpens", enabled);
   updateExportButtonState();
 }
 
@@ -303,96 +328,178 @@ function combinedMissingDays(visits, hits) {
   return [...days].sort();
 }
 
-function formatMissingCell(missingDays) {
-  if (!missingDays || missingDays.length === 0) {
-    return '<span class="stats-ok"><i data-lucide="check"></i> Нет</span>';
-  }
-  return `<span class="stats-warn"><i data-lucide="alert-triangle"></i> ${missingDays.length} дн.</span>`;
+function counterHasData(stats) {
+  if (!stats) return false;
+  const v = stats.visits?.total_rows || 0;
+  const h = stats.hits?.total_rows || 0;
+  return v > 0 || h > 0;
 }
 
-function hasCounterData(stats) {
-  if (!stats) return false;
-  const v = stats.visits;
-  const h = stats.hits;
-  return (v && v.total_rows !== null) || (h && h.total_rows !== null);
+function showMissingDatesPopover(anchor, dates) {
+  document.querySelector(".missing-popover")?.remove();
+
+  const pop = document.createElement("div");
+  pop.className = "missing-popover";
+  pop.innerHTML = `
+    <div class="missing-popover-title">Пропущенные даты</div>
+    ${dates.map((d) => `<div class="missing-date">${d}</div>`).join("")}
+  `;
+
+  const rect = anchor.getBoundingClientRect();
+  pop.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${rect.left}px;z-index:1000`;
+  document.body.appendChild(pop);
+
+  setTimeout(() => {
+    document.addEventListener(
+      "click",
+      () => pop.remove(),
+      { once: true }
+    );
+  }, 0);
+}
+
+function renderMissingCell(td, missingDays) {
+  if (!missingDays || missingDays.length === 0) {
+    td.innerHTML = '<span class="stats-ok"><i data-lucide="check"></i> Нет</span>';
+    return;
+  }
+  td.innerHTML = `<span class="missing-badge">⚠ ${missingDays.length} дн.</span>`;
+  td.querySelector(".missing-badge").addEventListener("click", (e) => {
+    e.stopPropagation();
+    showMissingDatesPopover(e.target, missingDays);
+  });
+}
+
+function renderStatsRow(counter, stats) {
+  const tr = document.createElement("tr");
+  const visits = stats.visits || {};
+  const hits = stats.hits || {};
+  const visitsText =
+    visits.total_rows != null ? visits.total_rows.toLocaleString("ru-RU") : "—";
+  const hitsText =
+    hits.total_rows != null ? hits.total_rows.toLocaleString("ru-RU") : "—";
+  const period = combinedPeriod(visits, hits);
+  const missing = combinedMissingDays(visits, hits);
+
+  const nameTd = document.createElement("td");
+  nameTd.textContent = counterDisplayName(counter);
+  tr.appendChild(nameTd);
+
+  const visitsTd = document.createElement("td");
+  visitsTd.className = "stats-num";
+  visitsTd.textContent = visitsText;
+  tr.appendChild(visitsTd);
+
+  const hitsTd = document.createElement("td");
+  hitsTd.className = "stats-num";
+  hitsTd.textContent = hitsText;
+  tr.appendChild(hitsTd);
+
+  const periodTd = document.createElement("td");
+  periodTd.textContent = period;
+  tr.appendChild(periodTd);
+
+  const missingTd = document.createElement("td");
+  renderMissingCell(missingTd, missing);
+  tr.appendChild(missingTd);
+
+  return tr;
+}
+
+function renderEmptyCounterRow(counter) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>${counterDisplayName(counter)}</td>
+    <td class="stats-num">—</td>
+    <td class="stats-num">—</td>
+    <td colspan="2" class="stats-no-data">Данные не загружены</td>
+  `;
+  return tr;
+}
+
+function updateEmptyCountersToggle(count) {
+  if (!emptyCountersToggle) return;
+  if (count === 0) {
+    emptyCountersToggle.hidden = true;
+    emptyCountersToggle.innerHTML = "";
+    return;
+  }
+
+  emptyCountersToggle.hidden = false;
+  const label = emptyCountersVisible
+    ? `Скрыть незагруженные (${count})`
+    : `Показать незагруженные (${count})`;
+  emptyCountersToggle.innerHTML =
+    `<button type="button" class="empty-counters-btn" id="showEmptyCountersBtn">${label}</button>`;
+
+  document.getElementById("showEmptyCountersBtn").addEventListener("click", () => {
+    emptyCountersVisible = !emptyCountersVisible;
+    if (emptyCountersTbody) {
+      emptyCountersTbody.style.display = emptyCountersVisible ? "" : "none";
+    }
+    updateEmptyCountersToggle(count);
+  });
 }
 
 function renderStatsTable() {
   if (!statsTbody) return;
 
-  const rowsWithData = [];
-  const rowsWithoutData = [];
+  const withData = [];
+  const withoutData = [];
   const seenIds = new Set();
 
   countersList.forEach((counter) => {
     const stats = statsByCounter.get(String(counter.id));
     seenIds.add(String(counter.id));
-    if (hasCounterData(stats)) {
-      rowsWithData.push({ counter, stats });
+    if (counterHasData(stats)) {
+      withData.push({ counter, stats });
     } else {
-      rowsWithoutData.push({ counter, stats: null });
+      withoutData.push(counter);
     }
   });
 
   statsByCounter.forEach((stats, id) => {
-    if (!seenIds.has(id)) {
-      rowsWithData.push({
+    if (!seenIds.has(id) && counterHasData(stats)) {
+      withData.push({
         counter: { id: Number(id), name: String(id), site: "" },
         stats,
       });
     }
   });
 
-  const ordered = [...rowsWithData, ...rowsWithoutData];
   statsTbody.innerHTML = "";
+  if (emptyCountersTbody) {
+    emptyCountersTbody.innerHTML = "";
+    emptyCountersTbody.style.display = emptyCountersVisible ? "" : "none";
+  }
 
-  if (!ordered.length) {
+  if (!withData.length && !withoutData.length) {
     const tr = document.createElement("tr");
     tr.innerHTML = '<td colspan="5" class="stats-no-data">Нет данных в БД</td>';
     statsTbody.appendChild(tr);
+    updateEmptyCountersToggle(0);
     return;
   }
 
-  ordered.forEach(({ counter, stats }) => {
-    const tr = document.createElement("tr");
-    if (!stats || !hasCounterData(stats)) {
-      tr.innerHTML = `
-        <td>${counterDisplayName(counter)}</td>
-        <td class="stats-num">—</td>
-        <td class="stats-num">—</td>
-        <td colspan="2" class="stats-no-data">Данные не загружены</td>
-      `;
-      statsTbody.appendChild(tr);
-      return;
-    }
-
-    const visits = stats.visits || {};
-    const hits = stats.hits || {};
-    const visitsText =
-      visits.total_rows !== null ? visits.total_rows.toLocaleString("ru-RU") : "—";
-    const hitsText =
-      hits.total_rows !== null ? hits.total_rows.toLocaleString("ru-RU") : "—";
-    const period = combinedPeriod(visits, hits);
-    const missing = combinedMissingDays(visits, hits);
-
-    tr.innerHTML = `
-      <td>${counterDisplayName(counter)}</td>
-      <td class="stats-num">${visitsText}</td>
-      <td class="stats-num">${hitsText}</td>
-      <td>${period}</td>
-      <td>${formatMissingCell(missing)}</td>
-    `;
-    statsTbody.appendChild(tr);
+  withData.forEach(({ counter, stats }) => {
+    statsTbody.appendChild(renderStatsRow(counter, stats));
   });
 
+  withoutData.forEach((counter) => {
+    if (emptyCountersTbody) {
+      emptyCountersTbody.appendChild(renderEmptyCounterRow(counter));
+    }
+  });
+
+  updateEmptyCountersToggle(withoutData.length);
   lucide.createIcons({ nodes: statsTbody.querySelectorAll("[data-lucide]") });
-  renderDbPreviewCounters();
+  populateDbCounterSelect();
 }
 
-function renderDbPreviewCounters() {
-  if (!dbPreviewCounter) return;
-  const selected = dbPreviewCounter.value;
-  dbPreviewCounter.innerHTML = '<option value="">Все счётчики</option>';
+function populateDbCounterSelect() {
+  if (!dbCounterSelect) return;
+  const selected = dbCounterSelect.value;
+  dbCounterSelect.innerHTML = '<option value="">Все счётчики</option>';
 
   const ids = new Set(statsByCounter.keys());
   countersList.forEach((counter) => ids.add(String(counter.id)));
@@ -402,11 +509,11 @@ function renderDbPreviewCounters() {
     const option = document.createElement("option");
     option.value = counterId;
     option.textContent = counter ? counterDisplayName(counter) : `Счётчик ${counterId}`;
-    dbPreviewCounter.appendChild(option);
+    dbCounterSelect.appendChild(option);
   });
 
-  if (selected && dbPreviewCounter.querySelector(`option[value="${selected}"]`)) {
-    dbPreviewCounter.value = selected;
+  if (selected && dbCounterSelect.querySelector(`option[value="${selected}"]`)) {
+    dbCounterSelect.value = selected;
   }
 }
 
@@ -421,106 +528,83 @@ function formatDbCell(value) {
 }
 
 function formatColumnHeader(column) {
-  return column.replace(/^ym:s:/, "").replace(/^ym:pv:/, "");
+  return column.replace(/^ym:[a-z]+:/, "");
 }
 
-function setDbPreviewLoading(loading) {
-  if (!dbPreviewBody) return;
-  dbPreviewBody.classList.toggle("is-loading", loading);
-  if (dbPreviewLoading) {
-    dbPreviewLoading.classList.toggle("hidden", !loading);
-  }
-}
+async function loadDbTable() {
+  if (!dbTableWrap) return;
 
-function updateDbPreviewPagination(total) {
-  if (!dbPreviewRange || !dbPreviewPrev || !dbPreviewNext) return;
-
-  if (!total) {
-    dbPreviewRange.textContent = "Нет данных";
-    dbPreviewPrev.disabled = true;
-    dbPreviewNext.disabled = true;
-    return;
-  }
-
-  const from = dbPreviewOffset + 1;
-  const to = Math.min(dbPreviewOffset + DB_PREVIEW_LIMIT, total);
-  dbPreviewRange.textContent = `Показано ${from}–${to} из ${total.toLocaleString("ru-RU")}`;
-  dbPreviewPrev.disabled = dbPreviewOffset <= 0;
-  dbPreviewNext.disabled = dbPreviewOffset + DB_PREVIEW_LIMIT >= total;
-}
-
-function renderDbPreviewTable(columns, rows) {
-  if (!dbPreviewThead || !dbPreviewTbody) return;
-
-  dbPreviewThead.innerHTML = "";
-  dbPreviewTbody.innerHTML = "";
-
-  const headerRow = document.createElement("tr");
-  columns.forEach((column) => {
-    const th = document.createElement("th");
-    th.textContent = formatColumnHeader(column);
-    th.title = column;
-    headerRow.appendChild(th);
-  });
-  dbPreviewThead.appendChild(headerRow);
-
-  rows.forEach((row) => {
-    const tr = document.createElement("tr");
-    row.forEach((cell) => {
-      const td = document.createElement("td");
-      const text = formatDbCell(cell);
-      td.textContent = text;
-      td.title = text;
-      tr.appendChild(td);
-    });
-    dbPreviewTbody.appendChild(tr);
-  });
-}
-
-async function loadDbPreview() {
-  if (!dataSection) return;
-
-  setDbPreviewLoading(true);
+  dbTableWrap.innerHTML = '<div class="loading-state">Загрузка...</div>';
 
   const params = new URLSearchParams({
-    table: dbPreviewTable,
-    limit: String(DB_PREVIEW_LIMIT),
-    offset: String(dbPreviewOffset),
+    table: dbCurrentTable,
+    limit: String(DB_PAGE_SIZE),
+    offset: String(dbCurrentPage * DB_PAGE_SIZE),
   });
-  if (dbPreviewCounter?.value) {
-    params.set("counter_id", dbPreviewCounter.value);
-  }
+  if (dbCurrentCounter) params.append("counter_id", dbCurrentCounter);
 
   try {
-    const response = await fetch(`/api/table-preview?${params}`, FETCH_OPTS);
-    const data = await response.json();
-    if (!response.ok) {
+    const res = await fetch(`/api/table-preview?${params}`, FETCH_OPTS);
+    const data = await res.json();
+    if (!res.ok) {
       throw new Error(data.detail || "Не удалось загрузить данные");
     }
 
-    renderDbPreviewTable(data.columns || [], data.rows || []);
-    updateDbPreviewPagination(data.total || 0);
+    const total = data.total || 0;
+    const columns = data.columns || [];
+    const rows = data.rows || [];
+    const from = total ? dbCurrentPage * DB_PAGE_SIZE + 1 : 0;
+    const to = Math.min((dbCurrentPage + 1) * DB_PAGE_SIZE, total);
+
+    if (dbPopupStats) {
+      dbPopupStats.textContent =
+        `Показано ${from}–${to} из ${total.toLocaleString("ru-RU")} строк · ${columns.length} колонок с данными`;
+    }
+
+    const table = document.createElement("table");
+    table.className = "data-table";
+
+    const thead = document.createElement("thead");
+    thead.innerHTML =
+      "<tr>" +
+      columns
+        .map((c) => `<th title="${c}">${formatColumnHeader(c)}</th>`)
+        .join("") +
+      "</tr>";
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      row.forEach((cell) => {
+        const td = document.createElement("td");
+        const text = formatDbCell(cell);
+        td.textContent = text;
+        td.title = text;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+
+    dbTableWrap.innerHTML = "";
+    dbTableWrap.appendChild(table);
+
+    const totalPages = Math.max(1, Math.ceil(total / DB_PAGE_SIZE));
+    if (dbPageInfo) {
+      dbPageInfo.textContent = `Страница ${dbCurrentPage + 1} из ${totalPages}`;
+    }
+    if (dbPrevPage) dbPrevPage.disabled = dbCurrentPage === 0;
+    if (dbNextPage) {
+      dbNextPage.disabled = (dbCurrentPage + 1) * DB_PAGE_SIZE >= total;
+    }
   } catch (error) {
-    if (dbPreviewThead) dbPreviewThead.innerHTML = "";
-    if (dbPreviewTbody) dbPreviewTbody.innerHTML = "";
-    if (dbPreviewRange) dbPreviewRange.textContent = error.message;
-    if (dbPreviewPrev) dbPreviewPrev.disabled = true;
-    if (dbPreviewNext) dbPreviewNext.disabled = true;
-  } finally {
-    setDbPreviewLoading(false);
-    lucide.createIcons({ nodes: dbPreviewLoading?.querySelectorAll("[data-lucide]") || [] });
+    dbTableWrap.innerHTML = `<div class="loading-state">${error.message}</div>`;
+    if (dbPopupStats) dbPopupStats.textContent = "";
+    if (dbPageInfo) dbPageInfo.textContent = "";
+    if (dbPrevPage) dbPrevPage.disabled = true;
+    if (dbNextPage) dbNextPage.disabled = true;
   }
-}
-
-const loadTablePreview = loadDbPreview;
-
-function switchDbPreviewTable(table) {
-  dbPreviewTable = table;
-  dbPreviewOffset = 0;
-  dbPreviewTabs.forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.table === table);
-  });
-  loadTablePreview();
 }
 
 async function loadStats() {
@@ -551,9 +635,6 @@ async function loadStats() {
     if (statsRefreshBtn) {
       statsRefreshBtn.disabled = false;
     }
-  }
-  if (isDataSectionVisible()) {
-    await loadTablePreview();
   }
 }
 
@@ -829,42 +910,58 @@ if (authModalClose) {
 }
 
 const toggleBtn = document.getElementById("toggleDataTable");
-if (toggleBtn && dataSection) {
+if (toggleBtn && dbPopup) {
   toggleBtn.addEventListener("click", () => {
-    const isHidden = dataSection.style.display === "none" || dataSection.style.display === "";
-    dataSection.style.display = isHidden ? "block" : "none";
-    toggleBtn.innerHTML = isHidden
-      ? '<i data-lucide="eye-off" style="width:14px;height:14px"></i> Скрыть данные'
-      : '<i data-lucide="table" style="width:14px;height:14px"></i> Посмотреть данные в БД';
-    lucide.createIcons();
-    if (isHidden) loadTablePreview();
+    dbPopup.style.display = "flex";
+    populateDbCounterSelect();
+    loadDbTable();
+    lucide.createIcons({ nodes: dbPopup.querySelectorAll("[data-lucide]") });
   });
 }
 
-if (dbPreviewCounter) {
-  dbPreviewCounter.addEventListener("change", () => {
-    dbPreviewOffset = 0;
-    loadTablePreview();
+if (dbPopupClose) {
+  dbPopupClose.addEventListener("click", () => {
+    dbPopup.style.display = "none";
   });
 }
 
-if (dbPreviewPrev) {
-  dbPreviewPrev.addEventListener("click", () => {
-    dbPreviewOffset = Math.max(0, dbPreviewOffset - DB_PREVIEW_LIMIT);
-    loadTablePreview();
+if (dbPopup) {
+  dbPopup.addEventListener("click", (e) => {
+    if (e.target === e.currentTarget) e.currentTarget.style.display = "none";
   });
 }
 
-if (dbPreviewNext) {
-  dbPreviewNext.addEventListener("click", () => {
-    dbPreviewOffset += DB_PREVIEW_LIMIT;
-    loadTablePreview();
+dbTabButtons.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    dbTabButtons.forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    dbCurrentTable = btn.dataset.table;
+    dbCurrentPage = 0;
+    loadDbTable();
   });
-}
-
-dbPreviewTabs.forEach((btn) => {
-  btn.addEventListener("click", () => switchDbPreviewTable(btn.dataset.table));
 });
+
+if (dbCounterSelect) {
+  dbCounterSelect.addEventListener("change", (e) => {
+    dbCurrentCounter = e.target.value;
+    dbCurrentPage = 0;
+    loadDbTable();
+  });
+}
+
+if (dbPrevPage) {
+  dbPrevPage.addEventListener("click", () => {
+    dbCurrentPage--;
+    loadDbTable();
+  });
+}
+
+if (dbNextPage) {
+  dbNextPage.addEventListener("click", () => {
+    dbCurrentPage++;
+    loadDbTable();
+  });
+}
 
 periodButtons.forEach((btn) => {
   btn.addEventListener("click", () => applyPeriod(btn.dataset.period));
