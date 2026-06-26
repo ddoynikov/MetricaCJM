@@ -122,6 +122,14 @@
           <span id="minTransitionsValue" class="slider-value">200</span>
         </div>
       </div>
+      <div class="filter-group">
+        <label class="filter-label">Layout</label>
+        <div class="layout-switcher">
+          <button type="button" class="layout-btn" data-layout="dagre">Dagre</button>
+          <button type="button" class="layout-btn active" data-layout="fcose">fCoSE</button>
+          <button type="button" class="layout-btn" data-layout="cola">Cola</button>
+        </div>
+      </div>
       <div class="filterbar-actions">
         <button type="button" id="find-user-btn" class="btn btn-secondary">Найти пользователя</button>
         <button type="button" id="apply-btn" class="btn btn-primary">Обновить граф</button>
@@ -144,14 +152,56 @@
     <main class="main-content main-content--flush hidden" id="cjm-main">
       <div class="cjm-graph-area">
         <div id="cy"></div>
-        <div class="cjm-legend">
-          <div class="cjm-legend-title">Легенда</div>
-          <div class="cjm-legend-item"><span class="legend-swatch legend-entry"></span> Вход на сайт</div>
-          <div class="cjm-legend-item"><span class="legend-swatch legend-content"></span> Контент</div>
-          <div class="cjm-legend-item"><span class="legend-swatch legend-funnel"></span> Воронка</div>
-          <div class="cjm-legend-item"><span class="legend-swatch legend-conversion"></span> Конверсия</div>
-          <div class="cjm-legend-hint">— Ширина линии = кол-во переходов</div>
-          <div class="cjm-legend-hint">○ Размер узла = визиты</div>
+        <div class="legend-box">
+          <div class="legend-title">ЛЕГЕНДА</div>
+
+          <div class="legend-section">
+            <div class="legend-subtitle">Тип страницы</div>
+            <div class="legend-item">
+              <span class="legend-dot" style="background:#2A3F6F;border:1.5px solid #4F7CFF"></span>
+              <div>
+                <span class="legend-label">Вход на сайт</span>
+                <span class="legend-hint">Главная и посадочные страницы</span>
+              </div>
+            </div>
+            <div class="legend-item">
+              <span class="legend-dot" style="background:#1C2030;border:1.5px solid #2E3550"></span>
+              <div>
+                <span class="legend-label">Контент</span>
+                <span class="legend-hint">Информационные страницы</span>
+              </div>
+            </div>
+            <div class="legend-item">
+              <span class="legend-dot" style="background:#3A2A1A;border:1.5px solid #F5A623"></span>
+              <div>
+                <span class="legend-label">Воронка</span>
+                <span class="legend-hint">Шаги оформления заказа</span>
+              </div>
+            </div>
+            <div class="legend-item">
+              <span class="legend-dot" style="background:#1A3A2A;border:1.5px solid #34C97E"></span>
+              <div>
+                <span class="legend-label">Конверсия</span>
+                <span class="legend-hint">Страницы успешного заказа</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="legend-section">
+            <div class="legend-subtitle">Визуальные подсказки</div>
+            <div class="legend-item">
+              <span class="legend-line-thick"></span>
+              <span class="legend-label">Много переходов</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-line-thin"></span>
+              <span class="legend-label">Мало переходов</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-dot" style="background:#1C2030;border:2.5px solid #2E3550;width:18px;height:18px"></span>
+              <span class="legend-label">Крупный узел = больше визитов</span>
+            </div>
+          </div>
         </div>
         <div class="cjm-zoom-panel">
           <button type="button" id="zoom-in" class="btn-icon" title="Увеличить">+</button>
@@ -197,6 +247,12 @@
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <script src="/static/layout.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+  <script src="https://unpkg.com/layout-base@2.0.1/layout-base.js"></script>
+  <script src="https://unpkg.com/cose-base@2.2.0/cose-base.js"></script>
+  <script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
+  <script src="https://unpkg.com/webcola@3.4.0/WebCola/cola.js"></script>
+  <script src="https://unpkg.com/cytoscape-cola@2.5.1/cytoscape-cola.js"></script>
+  <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
   <script src="/static/cjm.js"></script>

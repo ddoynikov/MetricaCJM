@@ -1,4 +1,6 @@
-cytoscape.use(cytoscapeDagre);
+if (typeof cytoscapeDagre !== "undefined") cytoscape.use(cytoscapeDagre);
+if (typeof cytoscapeFcose !== "undefined") cytoscape.use(cytoscapeFcose);
+if (typeof cytoscapeCola !== "undefined") cytoscape.use(cytoscapeCola);
 
 const FETCH_OPTS = { credentials: "same-origin" };
 const COUNTER_STORAGE_KEY = "cjm_counter_id";
@@ -39,6 +41,7 @@ let edgesData = [];
 let authorized = false;
 let highlightedNode = null;
 let activeUserFilter = null;
+let currentLayout = "fcose";
 
 const cyStyles = [
   {
@@ -121,13 +124,42 @@ const cyStyles = [
   },
 ];
 
-const layoutConfig = {
-  name: "dagre",
-  rankDir: "TB",
-  nodeSep: 60,
-  rankSep: 100,
-  fit: true,
-  padding: 40,
+const LAYOUT_CONFIGS = {
+  dagre: {
+    name: "dagre",
+    rankDir: "TB",
+    nodeSep: 80,
+    rankSep: 140,
+    fit: false,
+    padding: 60,
+    animate: false,
+  },
+  fcose: {
+    name: "fcose",
+    quality: "default",
+    randomize: false,
+    animate: false,
+    fit: false,
+    padding: 60,
+    nodeSeparation: 120,
+    idealEdgeLength: 150,
+    edgeElasticity: 0.45,
+    gravity: 0.25,
+    numIter: 2500,
+    tile: false,
+  },
+  cola: {
+    name: "cola",
+    animate: false,
+    fit: false,
+    padding: 60,
+    nodeSpacing: 60,
+    edgeLength: 180,
+    maxSimulationTime: 3000,
+    randomize: false,
+    avoidOverlap: true,
+    handleDisconnected: true,
+  },
 };
 
 const USER_ID_PLACEHOLDERS = {
@@ -284,11 +316,14 @@ function bindGraphInteractions() {
   });
 }
 
-function runLayoutAndFit() {
+function applyLayout() {
   if (!cy) return;
-  const layout = cy.layout(layoutConfig);
+  const config = LAYOUT_CONFIGS[currentLayout];
+  const layout = cy.layout(config);
   layout.on("layoutstop", () => {
-    cy.fit(undefined, 40);
+    cy.fit(undefined, 60);
+    if (cy.zoom() > 0.85) cy.zoom(0.85);
+    cy.center();
   });
   layout.run();
 }
@@ -388,7 +423,7 @@ function renderGraph(data, warning) {
 
   bindGraphControls();
   bindGraphInteractions();
-  runLayoutAndFit();
+  applyLayout();
 
   cjmMeta.textContent = `${data.nodes.length} узлов · ${data.edges.length} переходов`;
 }
@@ -609,6 +644,15 @@ minTransitionsInput.addEventListener("input", () => {
   minTransitionsValue.textContent = minTransitionsInput.value;
 });
 minTransitionsInput.addEventListener("change", loadCjm);
+
+document.querySelectorAll(".layout-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".layout-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentLayout = btn.dataset.layout;
+    applyLayout();
+  });
+});
 
 counterSelect.addEventListener("change", async () => {
   saveCounterId(getSelectedCounterId());
