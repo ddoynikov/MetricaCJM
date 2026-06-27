@@ -1,54 +1,50 @@
-# Яндекс Метрика Logs API Loader
+# MetricaCJM
 
-## Что делает
-Загружает сырые данные визитов и событий из Logs API Яндекс.Метрики в PostgreSQL (схема `raw_metrika`) через простой веб-интерфейс.
+Персональная платформа маркетинговой аналитики. Загружает сырые данные из Яндекс Метрики, строит Customer Journey Map и анализирует воронку по каналам.
 
-## Как запустить
+## Что умеет
 
-Первичная настройка (один раз):
+- **Загрузка данных** — Logs API Яндекс Метрики → PostgreSQL (визиты + хиты)
+- **CJM-граф** — пути пользователей по нормализованным URL, три layout (fCoSE / Cola / Dagre)
+- **Просмотр БД** — структура таблиц, поиск по ClientID, переход в CJM по клику
+- **Воронка** *(в разработке)* — каналы → расход → клики → визиты → конверсии
+- **Профиль клиента** *(планируется)* — история визитов конкретного пользователя
+
+## Стек
+
+- Backend: Python + FastAPI
+- Frontend: Vanilla JS + Cytoscape.js
+- БД: PostgreSQL 16 (Docker)
+- Данные: Яндекс Метрика Logs API
+
+## Запуск
 
 ```bash
-# 1. Убедиться что PostgreSQL запущен
+# 1. Запустить PostgreSQL
 cd ../../Shared/docker/postgres && docker compose up -d
 
-# 2. Создать схему и таблицы
-docker exec -i postgres psql -U analytics -d analytics < sql/001_init.sql
+# 2. Применить миграции (один раз)
+./go migrate
 
-# 3. Установить зависимости
-pip install -r requirements.txt
-
-# 4. Скопировать .env.example → .env, заполнить DATABASE_URL
-cp .env.example .env
+# 3. Запустить сервер
+./go
 ```
 
-Запуск приложения — достаточно выполнить из корня проекта:
-
-```bash
-./start.sh
-```
-
-Или двойной клик по `start.sh` в Finder. Скрипт работает из любой папки (переходит в каталог проекта сам).
-
-Открыть http://localhost:8000
+Открыть: http://localhost:8000
 
 ## Команды
 
 ```bash
 ./go              # перезапустить сервер
-./go save         # сохранить текущее состояние в git
+./go save         # сохранить в git
 ./go save "текст" # сохранить с комментарием
+./go migrate      # применить миграции БД
 ```
 
-## Схема БД
-- Схема: `raw_metrika`
-- Таблицы: `visits`, `hits`
-- Миграции: `sql/001_init.sql` (генерируется из `fields.py`), `sql/002_fix_uint64.sql` (для уже созданных таблиц)
+## Структура БД
 
-Если таблицы уже созданы со старыми типами, применить миграцию UInt64:
-
-```bash
-docker exec -i postgres psql -U analytics -d analytics < sql/002_fix_uint64.sql
-```
-
-## CHANGELOG
-См. CHANGELOG.md
+- `raw_metrika.visits` — сырые визиты из Метрики
+- `raw_metrika.hits` — сырые хиты из Метрики
+- `app_metrica_cjm.hits_normalized` — нормализованные URL
+- `app_metrica_cjm.transitions` — переходы между страницами
+- `app_metrica_cjm.page_metrics` — метрики страниц
