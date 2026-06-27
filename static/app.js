@@ -118,6 +118,7 @@ function initFlatpickr() {
       }
     },
   });
+  window.fpInstance = fpInstance;
 }
 
 const periods = {
@@ -363,7 +364,8 @@ function showMissingDatesPopover(anchor, dates) {
 
     const startDate = parseApiDate(first);
     const endDate = parseApiDate(last);
-    if (fpInstance) fpInstance.setDate([startDate, endDate]);
+    const fp = window.fpInstance || fpInstance;
+    if (fp) fp.setDate([startDate, endDate]);
     dateFrom = first;
     dateTo = last;
     const rangeTextEl = document.getElementById("dateRangeText");
@@ -375,9 +377,15 @@ function showMissingDatesPopover(anchor, dates) {
     updateExportButtonState();
     updateTopbarMeta();
 
-    document.getElementById("exportForm")?.scrollIntoView({ behavior: "smooth" });
+    document.getElementById("exportSection")?.scrollIntoView({ behavior: "smooth" });
   });
   pop.appendChild(btn);
+
+  const hint = document.createElement("div");
+  hint.style.cssText =
+    "font-size:10px;color:var(--text-muted);margin-top:4px;text-align:center";
+  hint.textContent = "Уже загруженные дни не перезапишутся (UPSERT)";
+  pop.appendChild(hint);
 
   const rect = anchor.getBoundingClientRect();
   pop.style.cssText = `
@@ -411,6 +419,34 @@ function renderMissingCell(td, missingDays) {
   });
 }
 
+function statsPeriodLabel(visits, hits) {
+  return visits?.period_label || hits?.period_label || "—";
+}
+
+function selectCounterFromStatsRow(counter, tr) {
+  const counterId = String(counter.id);
+  const select = document.getElementById("counterId");
+  if (select) {
+    const opt = [...select.options].find((o) => o.value === counterId);
+    if (opt) {
+      select.value = counterId;
+      select.dispatchEvent(new Event("change"));
+    }
+  }
+  document.getElementById("exportSection")?.scrollIntoView({ behavior: "smooth" });
+  document.querySelectorAll(".stats-table tr").forEach((r) => r.classList.remove("selected"));
+  tr.classList.add("selected");
+}
+
+function attachStatsRowClick(tr, counter) {
+  tr.style.cursor = "pointer";
+  tr.title = "Нажмите чтобы выбрать для загрузки";
+  tr.addEventListener("click", (e) => {
+    if (e.target.closest(".missing-badge")) return;
+    selectCounterFromStatsRow(counter, tr);
+  });
+}
+
 function renderStatsRow(counter, stats) {
   const tr = document.createElement("tr");
   const visits = stats.visits || {};
@@ -440,9 +476,15 @@ function renderStatsRow(counter, stats) {
   periodTd.textContent = period;
   tr.appendChild(periodTd);
 
+  const loadedTd = document.createElement("td");
+  loadedTd.textContent = statsPeriodLabel(visits, hits);
+  tr.appendChild(loadedTd);
+
   const missingTd = document.createElement("td");
   renderMissingCell(missingTd, missing);
   tr.appendChild(missingTd);
+
+  attachStatsRowClick(tr, counter);
 
   return tr;
 }
@@ -453,8 +495,9 @@ function renderEmptyCounterRow(counter) {
     <td>${counterDisplayName(counter)}</td>
     <td class="stats-num">—</td>
     <td class="stats-num">—</td>
-    <td colspan="2" class="stats-no-data">Данные не загружены</td>
+    <td colspan="3" class="stats-no-data">Данные не загружены</td>
   `;
+  attachStatsRowClick(tr, counter);
   return tr;
 }
 
@@ -516,7 +559,7 @@ function renderStatsTable() {
 
   if (!withData.length && !withoutData.length) {
     const tr = document.createElement("tr");
-    tr.innerHTML = '<td colspan="5" class="stats-no-data">Нет данных в БД</td>';
+    tr.innerHTML = '<td colspan="6" class="stats-no-data">Нет данных в БД</td>';
     statsTbody.appendChild(tr);
     updateEmptyCountersToggle(0);
     return;
@@ -734,11 +777,15 @@ async function loadDbTable() {
           td.title = "Нажмите чтобы исследовать в CJM";
           td.style.color = "var(--accent)";
           td.style.textDecoration = "underline";
-          td.addEventListener("click", () => {
+          td.addEventListener("click", (e) => {
+            e.stopPropagation();
             const hash = td.textContent.trim();
             if (!hash) return;
+            const counterId = dbCounterSelect?.value || "";
             if (dbPopup) dbPopup.style.display = "none";
-            window.location.href = `/cjm?user_hash=${encodeURIComponent(hash)}`;
+            const params = new URLSearchParams({ user_hash: hash });
+            if (counterId) params.append("counter_id", counterId);
+            window.location.href = `/cjm?${params.toString()}`;
           });
         }
 

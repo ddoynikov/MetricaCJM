@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from datetime import date, datetime, timedelta
+from dateutil.relativedelta import relativedelta
 from decimal import Decimal
 from typing import Any
 
@@ -999,6 +1000,19 @@ def build_cjm_filter(
     return " AND ".join(clauses), params, warning
 
 
+def format_period(date_min: date | None, date_max: date | None) -> str | None:
+    if not date_min or not date_max:
+        return None
+    delta = relativedelta(date_max, date_min)
+    total_days = (date_max - date_min).days + 1
+    if delta.years > 0:
+        months = delta.years * 12 + delta.months
+        return f"{months} мес."
+    if delta.months > 0:
+        return f"{delta.months} мес."
+    return f"{total_days} дн."
+
+
 def empty_stats_block() -> dict[str, Any]:
     return {
         "total_rows": None,
@@ -1067,6 +1081,7 @@ def fetch_grouped_table_stats(
             "date_min": date_min.isoformat() if date_min else None,
             "date_max": date_max.isoformat() if date_max else None,
             "missing_days": missing_days,
+            "period_label": format_period(date_min, date_max),
         }
     return result
 

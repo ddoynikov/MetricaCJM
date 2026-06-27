@@ -4,3 +4,4 @@ httpx
 psycopg[binary]
 python-dotenv
 itsdangerous
+python-dateutil

@@ -619,35 +619,37 @@ async function initPage() {
     await loadCounters();
 
     const urlParams = new URLSearchParams(window.location.search);
+    const prefilledHash = urlParams.get("user_hash");
     const prefilledCounterId = urlParams.get("counter_id");
-    if (prefilledCounterId) {
-      const setCounter = () => {
-        const option = [...counterSelect.options].find((o) => o.value === prefilledCounterId);
-        if (option) {
-          counterSelect.value = prefilledCounterId;
-          saveCounterId(Number(prefilledCounterId));
-          updateTopbarCounter();
-        }
-      };
-      if (counterSelect.options.length > 1) {
-        setCounter();
-      } else {
-        counterSelect.addEventListener("countersLoaded", setCounter, { once: true });
+
+    const waitForCounters = () => {
+      if (!prefilledCounterId) return;
+      const option = [...counterSelect.options].find((o) => o.value === prefilledCounterId);
+      if (option) {
+        counterSelect.value = prefilledCounterId;
+        saveCounterId(Number(prefilledCounterId));
+        updateTopbarCounter();
+        counterSelect.dispatchEvent(new Event("change"));
       }
+    };
+
+    if (prefilledCounterId) {
+      waitForCounters();
+      setTimeout(waitForCounters, 500);
     }
 
-    await loadChannels();
-
-    const prefilledHash = urlParams.get("user_hash");
     if (prefilledHash) {
-      userSearchBar.classList.remove("hidden");
-      userIdValueInput.value = prefilledHash;
-      userIdTypeSelect.value = "counter_user_id_hash";
-      updateUserIdPlaceholder();
-      applyUserSearch();
+      setTimeout(() => {
+        userSearchBar.classList.remove("hidden");
+        userIdTypeSelect.value = "counter_user_id_hash";
+        userIdValueInput.value = prefilledHash;
+        updateUserIdPlaceholder();
+        applyUserSearch();
+      }, 800);
       return;
     }
 
+    await loadChannels();
     if (getSelectedCounterId()) {
       await loadCjm();
     } else {

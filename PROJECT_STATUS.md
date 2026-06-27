@@ -18,7 +18,7 @@
   - Миграции БД применены: `002_fix_uint64.sql`, `003_fix_uint64.sql`
   - UPSERT, превью, `./start.sh` (автоприменение `004_cjm_schema.sql` через docker)
   - CJM: схема `app_metrica_cjm`, нормализация URL в SQL, API `/api/cjm*`
-  - `/api/stats` — сводка по всем счётчикам с данными в БД (visits/hits, пропуски, last_updated)
+  - `/api/stats` — сводка по счётчикам (visits/hits, пропуски, `period_label`, last_updated)
   - UI: тёмная тема, shell-лейаут (sidebar + topbar), design tokens, Lucide icons
   - `/` — компактная таблица состояния БД по счётчикам; range-picker Flatpickr; быстрые периоды (включая «Год»)
   - `/cjm` — граф: прямоугольные узлы 13px, border по трафику, ссылка «Открыть страницу ↗»
@@ -102,7 +102,7 @@ MetricaCJM/
 - Нормализация URL для CJM — только в SQL (`004_cjm_schema.sql`), не в Python
 - Фильтры CJM (counter_id, device, utm_medium, user_id) применяются динамически к `hits_normalized`; пересчёт таблиц — DROP + CREATE через `/api/cjm/refresh`
 - Фильтр по пользователю: `counter_user_id_hash` через подзапрос к `raw_metrika.hits`; `user_id` — только если колонка существует в схеме
-- `/api/stats` — группировка по `counter_id` в visits/hits; UI объединяет с OAuth-списком счётчиков
+- `/api/stats` — группировка по `counter_id`; `period_label` («N мес.» / «N дн.») в visits/hits
 - OAuth-токен хранится в серверной cookie-сессии (`SECRET_KEY`); `METRIKA_TOKEN` из `.env` — fallback при первом запросе
 - UI: CSS design tokens (`tokens.css`), общий shell (`layout.css`, `layout.js`), компоненты (`components.css`), страничные стили (`style.css`, `cjm.css`)
 - `/api/table-preview` — постраничный просмотр `raw_metrika.visits|hits`, сортировка по `date DESC`, опциональный фильтр `counter_id`; колонки без данных на текущей странице скрываются; UI — модальный попап на `/` с локальной сортировкой по клику на заголовок

@@ -55,6 +55,15 @@
   color: var(--text-secondary);
 }
 
+.stats-table tr.selected td {
+  background: var(--accent-dim);
+}
+
+.stats-table tr:hover td {
+  background: var(--bg-hover);
+  cursor: pointer;
+}
+
 .stats-table tbody tr:last-child td {
   border-bottom: none;
 }
