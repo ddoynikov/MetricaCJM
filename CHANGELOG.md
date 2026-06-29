@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-06-29 — MVP: CJM для всех счётчиков
+
+Релиз MVP: загрузка данных + CJM-граф стабильны на нескольких счётчиках.
+
+- **Корневая причина:** после рефакторинга `cf9994b` `/api/cjm/refresh` не заполнял `hits_normalized` из `raw_metrika.hits`; старый SQL фильтровал `url LIKE '%warpoint%'`
+- `app.py`: `CJM_FILL_HITS_NORMALIZED_SQL` — нормализация URL из сырых hits (без warpoint-фильтра); `refresh_cjm_tables` пересчитывает hits_normalized → transitions → page_metrics
+- **Баг psycopg3:** LIKE-паттерны с `%` и `%step%` ломали execute — заменены на regex `~`; `page_metrics` SQL — один CTE `filtered` вместо трёх `{counter_where}` (было «3 placeholders but 1 parameters»)
+- `GET /api/cjm/status` — сводка raw_hits vs hits_normalized vs transitions по counter_id
+- `static/cjm.js`: «Пересчитать CJM» передаёт `counter_id` выбранного счётчика
+- `static/app.js`: автопересчёт CJM после успешной выгрузки
+
 ## 2026-06-27 — Итерация 7: выбор счётчика кликом, CJM deep-link, период загрузки
 
 - Клик на строку таблицы состояния — выбор счётчика в форме, scroll к `#exportSection`

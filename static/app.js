@@ -974,6 +974,25 @@ async function pollStatus(jobId) {
       resultHits.textContent = (data.rows_hits || 0).toLocaleString("ru-RU");
       appendLog(`Готово: ${data.rows_visits || 0} визитов, ${data.rows_hits || 0} хитов`);
       loadStats();
+      const exportedCounterId = counterSelect.value;
+      if (exportedCounterId && refreshCjmBtn) {
+        appendLog("Пересчёт CJM…");
+        fetch(`/api/cjm/refresh?counter_id=${encodeURIComponent(exportedCounterId)}`, {
+          method: "POST",
+          ...FETCH_OPTS,
+        })
+          .then((res) => res.json().catch(() => ({})))
+          .then((refreshData) => {
+            if (refreshData.status === "ok") {
+              appendLog(refreshData.message || "CJM пересчитан");
+              refreshCjmBtn.textContent = "✓ CJM пересчитан";
+              refreshCjmBtn.style.color = "var(--success)";
+            } else {
+              appendLog("Ошибка пересчёта CJM");
+            }
+          })
+          .catch(() => appendLog("Ошибка пересчёта CJM"));
+      }
     } else if (data.status === "error") {
       stopPolling();
       statusMessage.textContent = data.message;

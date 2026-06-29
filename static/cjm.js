@@ -540,6 +540,11 @@ async function loadCjm() {
 }
 
 async function refreshCjm() {
+  const counterId = getSelectedCounterId();
+  if (!counterId) {
+    showError("Выберите счётчик для пересчёта");
+    return;
+  }
   if (!confirm("Пересчитать таблицы CJM из сырых данных? Это может занять время.")) {
     return;
   }
@@ -549,7 +554,8 @@ async function refreshCjm() {
   refreshBtn.textContent = "Пересчёт…";
 
   try {
-    const response = await fetch("/api/cjm/refresh", { ...FETCH_OPTS, method: "POST" });
+    const url = `/api/cjm/refresh?counter_id=${encodeURIComponent(counterId)}`;
+    const response = await fetch(url, { ...FETCH_OPTS, method: "POST" });
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.detail || "Ошибка пересчёта");

@@ -6,8 +6,9 @@
 Загружает сырые данные визитов и событий из Logs API Яндекс.Метрики в PostgreSQL через веб-интерфейс. Строит Customer Journey Map (CJM) по нормализованным URL.
 
 ## Текущее состояние
-- Статус: в разработке
-- Последняя итерация: 2026-06-27 (Итерация 7 — polish UX загрузки и CJM)
+- **Статус: MVP** (2026-06-29)
+- Последняя итерация: 2026-06-29 (Итерация 8 — CJM для всех счётчиков, psycopg3 fix)
+- **MVP включает:** загрузка Logs API → PostgreSQL, мониторинг пропусков, просмотр БД, CJM-граф с фильтрами и deep-link
 - Что работает:
   - Подключение по OAuth-токену и список счётчиков
   - OAuth-флоу: ClientID → authorize URL → вставка токена → POST /api/auth
@@ -58,6 +59,10 @@
   - **Итерация 7:** клик на строку таблицы состояния — выбор счётчика + scroll к `#exportSection`
   - **Итерация 7:** deep-link CJM из попапа БД — `user_hash` + `counter_id`; колонка «Загружено» (`period_label`)
   - **Итерация 7:** «Догрузить пропуски» — `window.fpInstance`, подсказка UPSERT
+  - **Итерация 8:** `/api/cjm/refresh` заполняет `hits_normalized` из `raw_metrika.hits` (без фильтра `%warpoint%`)
+  - **Итерация 8:** фикс psycopg3 — regex вместо LIKE с `%`; page_metrics через CTE `filtered` (1 placeholder)
+  - **Итерация 8:** `GET /api/cjm/status` — raw_hits / hits_normalized / transitions по counter_id, флаг `cjm_ready`
+  - **Итерация 8:** CJM UI — «Пересчитать CJM» с `counter_id`; автопересчёт после выгрузки на `/`
 - Что не работает / в процессе:
   - Страница «Воронка» (`/funnel`) — заглушка «скоро»
   - AI-анализ, Конкуренты — только в навигации (disabled)
@@ -102,18 +107,19 @@ MetricaCJM/
 
 ## Архитектурные решения принятые в проекте
 - psycopg3 передаёт Python `int` как BIGINT — для NUMERIC-полей UInt64 значения конвертируются в `str` перед INSERT
-- Нормализация URL для CJM — только в SQL (`004_cjm_schema.sql`), не в Python
-- Фильтры CJM (counter_id, device, utm_medium, user_id) применяются динамически к `hits_normalized`; пересчёт таблиц — DROP + CREATE через `/api/cjm/refresh`
+- Нормализация URL для CJM — в SQL внутри `CJM_FILL_HITS_NORMALIZED_SQL` (`app.py`), DDL в `004_cjm_schema.sql`
+- Фильтры CJM (counter_id, device, utm_medium, user_id) применяются динамически к `hits_normalized`; пересчёт — `/api/cjm/refresh` (hits_normalized → transitions → page_metrics)
 - Фильтр по пользователю: `counter_user_id_hash` через подзапрос к `raw_metrika.hits`; `user_id` — только если колонка существует в схеме
 - `/api/stats` — группировка по `counter_id`; `period_label` («N мес.» / «N дн.») в visits/hits
 - OAuth-токен хранится в серверной cookie-сессии (`SECRET_KEY`); `METRIKA_TOKEN` из `.env` — fallback при первом запросе
 - UI: CSS design tokens (`tokens.css`), общий shell (`layout.css`, `layout.js`), компоненты (`components.css`), страничные стили (`style.css`, `cjm.css`)
 - `/api/table-preview` — постраничный просмотр `raw_metrika.visits|hits`, сортировка по `date DESC`, опциональный фильтр `counter_id`; колонки без данных на текущей странице скрываются; UI — модальный попап на `/` с локальной сортировкой по клику на заголовок
 - CJM deep-link: `/cjm?user_hash=…` предзаполняет поиск; `/cjm?counter_id=…` выбирает счётчик
-- `/api/cjm/refresh` — полный пересчёт или `counter_id` — DELETE + INSERT transitions/page_metrics для одного счётчика
+- `/api/cjm/refresh` — полный пересчёт или `counter_id`: DELETE hits_normalized + INSERT из raw → transitions + page_metrics
 - CJM: переходы с `/` и на `/` не фильтруются порогом `min_transitions`; узел `/` всегда включается в ответ
 
-## Следующий шаг
-- Прогон полной выгрузки на реальном счётчике, пересчёт CJM и проверка графа на warpoint-данных
-- При необходимости UserID — добавить `ym:pv:userID` в fields.py и миграцию колонки `user_id`
-- Страница «Воронка» или AI-анализ (по приоритету)
+## Следующий шаг (post-MVP)
+- UserID — `ym:pv:userID` в fields.py + миграция колонки `user_id`
+- Модуль «Воронка» (каналы → конверсии)
+- AI-анализ CJM
+- UX: снизить дефолт `min_transitions` для малых счётчиков

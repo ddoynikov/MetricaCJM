@@ -1145,13 +1145,31 @@ def cjm_tables_exist(cur: psycopg.Cursor) -> bool:
 
 def refresh_cjm_tables(counter_id: int | None = None) -> None:
     counter_where = ""
+    hits_counter_where = ""
     params: list[Any] = []
     if counter_id is not None:
         counter_where = "WHERE counter_id = %s"
+        hits_counter_where = "AND h.counter_id = %s"
         params = [counter_id]
 
     with get_connection() as conn:
         with conn.cursor() as cur:
+            if counter_id is not None:
+                cur.execute(
+                    "DELETE FROM app_metrica_cjm.hits_normalized WHERE counter_id = %s",
+                    [counter_id],
+                )
+            else:
+                cur.execute(
+                    "TRUNCATE app_metrica_cjm.hits_normalized, "
+                    "app_metrica_cjm.transitions, app_metrica_cjm.page_metrics"
+                )
+
+            cur.execute(
+                CJM_FILL_HITS_NORMALIZED_SQL.format(hits_counter_where=hits_counter_where),
+                params,
+            )
+
             if counter_id is not None:
                 cur.execute(
                     "DELETE FROM app_metrica_cjm.transitions WHERE counter_id = %s",
@@ -1161,8 +1179,7 @@ def refresh_cjm_tables(counter_id: int | None = None) -> None:
                     "DELETE FROM app_metrica_cjm.page_metrics WHERE counter_id = %s",
                     [counter_id],
                 )
-            else:
-                cur.execute("TRUNCATE app_metrica_cjm.transitions, app_metrica_cjm.page_metrics")
+
             cur.execute(
                 CJM_FILL_TRANSITIONS_SQL.format(counter_where=counter_where),
                 params,
@@ -1173,6 +1190,61 @@ def refresh_cjm_tables(counter_id: int | None = None) -> None:
             )
         conn.commit()
 
+
+CJM_FILL_HITS_NORMALIZED_SQL = """
+INSERT INTO app_metrica_cjm.hits_normalized (
+  counter_id, visit_id, date_time, device_category,
+  utm_source, utm_medium, utm_campaign, goals_id, domain, page
+)
+SELECT
+  counter_id,
+  visit_id,
+  date_time,
+  device_category,
+  utm_source,
+  utm_medium,
+  utm_campaign,
+  goals_id,
+  domain,
+  CASE
+    WHEN regexp_replace(page_raw, '#.*$', '') IN ('', '/') THEN '/'
+    ELSE rtrim(regexp_replace(page_raw, '#.*$', ''), '/')
+  END AS page
+FROM (
+  SELECT
+    h.counter_id,
+    h.visit_id,
+    h.date_time,
+    h.device_category,
+    h.utm_source,
+    h.utm_medium,
+    h.utm_campaign,
+    h.goals_id,
+    CASE
+      WHEN h.url ~ 'warpoint-kemerovo\.ru' THEN 'kemerovo.warpoint.ru'
+      ELSE regexp_replace(h.url, '^(https?://[^/]+).*', '\\1')
+    END AS domain,
+    CASE
+      WHEN regexp_replace(h.url, '\\?.*$', '') ~ '^https?://[^/]+/$' THEN '/'
+      WHEN h.url ~ '#[a-zA-Z]'
+        AND regexp_replace(regexp_replace(h.url, '\\?.*$', ''), '^https?://[^/]+/?', '') ~ '^#'
+        THEN '/'
+      WHEN h.url ~ '/tilda/product/detail/' THEN '/tilda/product/*'
+      WHEN h.url ~ '/tilda/form.*step'
+        THEN '/form_' || regexp_replace(h.url, '.*(step\\d+).*', '\\1')
+      WHEN h.url ~ '/tilda/popup' THEN '/form_popup'
+      WHEN h.url ~ '/tilda/form.*submitted' THEN '/form_submitted'
+      ELSE regexp_replace(
+        regexp_replace(h.url, '\\?.*$', ''),
+        '^https?://[^/]+', ''
+      )
+    END AS page_raw
+  FROM raw_metrika.hits h
+  WHERE h.is_page_view = 1
+    AND h.url !~ 'yandexwebcache'
+    {hits_counter_where}
+) normalized
+"""
 
 CJM_FILL_TRANSITIONS_SQL = """
 INSERT INTO app_metrica_cjm.transitions (counter_id, from_page, to_page, transitions_count, unique_visits)
@@ -1202,12 +1274,16 @@ CJM_FILL_PAGE_METRICS_SQL = """
 INSERT INTO app_metrica_cjm.page_metrics (
   counter_id, page, total_hits, unique_visits, entries, exits, exit_rate
 )
-WITH entries AS (
+WITH filtered AS (
+  SELECT counter_id, visit_id, page, date_time
+  FROM app_metrica_cjm.hits_normalized
+  {counter_where}
+),
+entries AS (
   SELECT counter_id, page, COUNT(*) AS entry_count
   FROM (
     SELECT DISTINCT ON (counter_id, visit_id) counter_id, visit_id, page
-    FROM app_metrica_cjm.hits_normalized
-    {counter_where}
+    FROM filtered
     ORDER BY counter_id, visit_id, date_time ASC
   ) t
   GROUP BY counter_id, page
@@ -1216,8 +1292,7 @@ exits AS (
   SELECT counter_id, page, COUNT(*) AS exit_count
   FROM (
     SELECT DISTINCT ON (counter_id, visit_id) counter_id, visit_id, page
-    FROM app_metrica_cjm.hits_normalized
-    {counter_where}
+    FROM filtered
     ORDER BY counter_id, visit_id, date_time DESC
   ) t
   GROUP BY counter_id, page
@@ -1228,8 +1303,7 @@ totals AS (
     page,
     COUNT(*) AS total_hits,
     COUNT(DISTINCT visit_id) AS unique_visits
-  FROM app_metrica_cjm.hits_normalized
-  {counter_where}
+  FROM filtered
   GROUP BY counter_id, page
 )
 SELECT
@@ -1413,6 +1487,63 @@ def get_cjm_channels(
             cur.execute(CJM_CHANNELS_SQL.format(filter=filter_sql), filter_params)
             channels = [row["utm_medium"] for row in cur.fetchall()]
     return {"channels": channels}
+
+
+@app.get("/api/cjm/status")
+def get_cjm_status():
+    """Сводка по счётчикам: сырые hits vs hits_normalized / transitions."""
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                SELECT counter_id, COUNT(*) AS hits_count
+                FROM raw_metrika.hits
+                GROUP BY counter_id
+                """
+            )
+            raw_by_counter = {int(r["counter_id"]): int(r["hits_count"]) for r in cur.fetchall()}
+
+            normalized_by_counter: dict[int, int] = {}
+            transitions_by_counter: dict[int, int] = {}
+            if cjm_tables_exist(cur):
+                cur.execute(
+                    """
+                    SELECT counter_id, COUNT(*) AS cnt
+                    FROM app_metrica_cjm.hits_normalized
+                    GROUP BY counter_id
+                    """
+                )
+                normalized_by_counter = {
+                    int(r["counter_id"]): int(r["cnt"]) for r in cur.fetchall()
+                }
+                cur.execute(
+                    """
+                    SELECT counter_id, COUNT(*) AS cnt
+                    FROM app_metrica_cjm.transitions
+                    GROUP BY counter_id
+                    """
+                )
+                transitions_by_counter = {
+                    int(r["counter_id"]): int(r["cnt"]) for r in cur.fetchall()
+                }
+
+    all_ids = sorted(set(raw_by_counter) | set(normalized_by_counter))
+    counters = []
+    for counter_id in all_ids:
+        raw_hits = raw_by_counter.get(counter_id, 0)
+        normalized = normalized_by_counter.get(counter_id, 0)
+        transitions = transitions_by_counter.get(counter_id, 0)
+        counters.append(
+            {
+                "counter_id": counter_id,
+                "raw_hits": raw_hits,
+                "hits_normalized": normalized,
+                "transitions": transitions,
+                "cjm_ready": normalized > 0 and transitions > 0,
+            }
+        )
+
+    return {"counters": counters}
 
 
 @app.post("/api/cjm/refresh")
